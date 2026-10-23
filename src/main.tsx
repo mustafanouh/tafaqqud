@@ -4,8 +4,13 @@ import { registerSW } from 'virtual:pwa-register'
 import './styles/index.css'
 import App from './app/App'
 
-// التحديث يتم بصمت عند إعادة فتح التطبيق؛ IndexedDB لا تتأثر بتحديث ملفات التطبيق
-registerSW({ immediate: true })
+// التحديث التلقائي للنسخة الجديدة
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    updateSW(true)
+  },
+})
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
