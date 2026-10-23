@@ -13,7 +13,7 @@ import SearchInput from './SearchInput'
 import StudentCard from './StudentCard'
 import StudentEvaluationCard from './StudentEvaluationCard'
 
-type Filter = 'all' | 'unmarked'
+type Filter = 'all' | RecordStatus
 type ViewMode = 'attendance' | 'evaluation'
 
 export default function DayAttendanceView({ dayId }: { dayId: string }) {
@@ -27,11 +27,18 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
   const [mode, setMode] = useState<ViewMode>('attendance')
   const [evaluationInfo, setEvaluationInfo] = useState('')
 
+  const [pendingStatusChange, setPendingStatusChange] = useState<{
+    studentId: string
+    studentName: string
+    currentStatus: RecordStatus
+    newStatus: RecordStatus
+  } | null>(null)
+
   const rows = useMemo(() => {
     if (!view) return []
     const q = normalizeName(query)
     return view.rows.filter(
-      (r) => (filter === 'all' || r.record.status === 'unmarked') && (!q || r.student.normalizedName.includes(q)),
+      (r) => (filter === 'all' || r.record.status === filter) && (!q || r.student.normalizedName.includes(q)),
     )
   }, [view, query, filter])
 
@@ -48,6 +55,37 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
     } catch (e) {
       setError(e instanceof Error ? `تعذر الحفظ: ${e.message}` : 'تعذر الحفظ')
     }
+  }
+
+  const handleRequestStatusChange = (
+    studentId: string,
+    studentName: string,
+    currentStatus: RecordStatus,
+    newStatus: RecordStatus,
+  ) => {
+    if (newStatus === currentStatus) return
+
+    if (confirmed) {
+      setPendingStatusChange({
+        studentId,
+        studentName,
+        currentStatus,
+        newStatus,
+      })
+    } else {
+      guard(() => attendanceService.setStatus(day.id, studentId, newStatus))
+    }
+  }
+
+  const confirmStatusChange = async () => {
+    if (!pendingStatusChange || busy) return
+    const { studentId, newStatus } = pendingStatusChange
+    setBusy(true)
+    await guard(async () => {
+      await attendanceService.setStatus(day.id, studentId, newStatus)
+      setPendingStatusChange(null)
+    })
+    setBusy(false)
   }
 
   const openConfirm = () =>
@@ -85,6 +123,18 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
   const evaluationRows = view.rows.filter((row) => row.record.status === 'present' || row.record.status === 'late')
   const notEvaluatedCount = view.rows.length - evaluationRows.length
 
+  const filterOptions: {
+    key: Filter
+    label: string
+    count: number
+    activeCls: string
+  }[] = [
+    { key: 'all', label: 'الكل', count: stats.total, activeCls: 'bg-teal-700 border-teal-700 text-white' },
+    { key: 'present', label: 'الحاضرون', count: stats.present, activeCls: 'bg-green-700 border-green-700 text-white' },
+    { key: 'late', label: 'المتأخرون', count: stats.late, activeCls: 'bg-orange-600 border-orange-600 text-white' },
+    { key: 'absent', label: 'الغائبون', count: stats.absent, activeCls: 'bg-red-700 border-red-700 text-white' },
+  ]
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -121,13 +171,33 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
 
       {mode === 'attendance' ? <div className="no-print space-y-2">
         <SearchInput value={query} onChange={setQuery} />
-        <div className="grid grid-cols-2 gap-2">
-          <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>
-            الكل ({stats.total.toLocaleString('ar-SY')})
-          </button>
-          <button className={filter === 'unmarked' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('unmarked')}>
-            غير المحددين ({stats.unmarked.toLocaleString('ar-SY')})
-          </button>
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 sm:flex-wrap" role="tablist" aria-label="تصفية الطلاب حسب الحالة">
+          {filterOptions.map(({ key, label, count, activeCls }) => {
+            const active = filter === key
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setFilter(key)}
+                className={`inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold border transition-all ${
+                  active
+                    ? `${activeCls} shadow-sm`
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                }`}
+              >
+                <span>{label}</span>
+                <span
+                  className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-bold ${
+                    active ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {count.toLocaleString('ar-SY')}
+                </span>
+              </button>
+            )
+          })}
         </div>
         {!confirmed && (
           <button className="btn-primary w-full" onClick={openConfirm} disabled={busy}>
@@ -169,7 +239,9 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
               key={`${record.id}-${record.updatedAt}`}
               student={student}
               record={record}
-              onStatus={(s: RecordStatus) => guard(() => attendanceService.setStatus(day.id, student.id, s))}
+              onStatus={(s: RecordStatus) =>
+                handleRequestStatusChange(student.id, student.name, record.status, s)
+              }
               onNote={(n) => guard(() => attendanceService.setNote(day.id, student.id, n))}
             />
           ))}
@@ -210,6 +282,40 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
             ? `سيتم تسجيل ${unmarkedCount.toLocaleString('ar-SY')} طالب غير محدد كغائبين. يبقى المحددون مسبقاً كما هم.`
             : 'جميع الطلاب محددون. سيصبح التفقد معتمداً ويمكنك التعديل لاحقاً.'}
         </p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={Boolean(pendingStatusChange)}
+        title="تأكيد تغيير حالة الطالب"
+        confirmLabel="تأكيد التغيير"
+        cancelLabel="إلغاء"
+        busy={busy}
+        onConfirm={confirmStatusChange}
+        onCancel={() => setPendingStatusChange(null)}
+      >
+        {pendingStatusChange && (
+          <div className="space-y-3">
+            <p className="text-gray-700">
+              هذا التفقد معتمد مسبقاً. هل تريد بالتأكيد تغيير حالة الطالب{' '}
+              <strong className="text-gray-900">{pendingStatusChange.studentName}</strong>؟
+            </p>
+            <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm">
+              <div>
+                <span className="block text-xs text-gray-500">الحالة السابقة</span>
+                <span className="font-bold text-gray-800">
+                  {STATUS_LABEL[pendingStatusChange.currentStatus]}
+                </span>
+              </div>
+              <span className="font-bold text-lg text-gray-400">←</span>
+              <div>
+                <span className="block text-xs text-gray-500">الحالة الجديدة</span>
+                <span className="font-bold text-teal-700">
+                  {STATUS_LABEL[pendingStatusChange.newStatus]}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </ConfirmDialog>
     </div>
   )
