@@ -4,8 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "tsc -b && vite build",
+    "lint": "tsc -b",
     "preview": "vite preview",
     "test": "vitest run"
   },
@@ -14,6 +15,7 @@
     "dexie-react-hooks": "^4.4.0",
     "lucide-react": "^1.61.0",
     "pdfmake": "^0.3.12",
+    "pdfmake-rtl": "^2.1.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.4"

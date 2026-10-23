@@ -1,0 +1,5 @@
+{
+  "name": "تفقد — إدارة حضور الطلاب",
+  "description": "تطبيق محلي لإدارة حضور وغياب وتأخر وتقييم الطلاب",
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

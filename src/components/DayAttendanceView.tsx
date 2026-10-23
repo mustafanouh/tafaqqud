@@ -97,8 +97,9 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
         <div className="no-print flex gap-2">
           <button className="btn-secondary px-3" onClick={() => window.print()} aria-label="طباعة">
             <Printer size={18} aria-hidden />
+            <span className="hidden sm:inline">طباعة</span>
           </button>
-          <button className="btn-secondary px-3" onClick={exportPdf} disabled={busy} aria-label="تنزيل PDF">
+          <button className="btn-primary px-4" onClick={exportPdf} disabled={busy} aria-label="تنزيل PDF">
             <Download size={18} aria-hidden />
             <span>{busy ? 'جارٍ التجهيز…' : 'تنزيل PDF'}</span>
           </button>
