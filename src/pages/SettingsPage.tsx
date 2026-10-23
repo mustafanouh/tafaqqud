@@ -63,13 +63,11 @@ export default function SettingsPage() {
         <p>إصدار التطبيق: {APP_VERSION}</p>
         {usage && <p>المساحة المستخدمة تقريباً: {usage}</p>}
         <p>البيانات محلية على هذا الجهاز ولا تُرسل إلى أي خدمة. الوصول إلى الجهاز أو المتصفح يعني الوصول إلى البيانات.</p>
-       <p> تم الانشاء بواسطة: م.مصطفى نوح</p>
+        <p> تم الانشاء بواسطة: م.مصطفى نوح</p>
       </div>
       <Link to="/backup" className="btn-secondary w-full">
         الانتقال إلى النسخ الاحتياطي
-      </Link>git add .
-git commit -m "chore: bump version"
-git push
+      </Link>
     </div>
   )
 }

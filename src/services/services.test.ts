@@ -1,12 +1,15 @@
 import 'fake-indexeddb/auto'
+import Dexie from 'dexie'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db } from '../db/database'
+import { TafaqqudDB } from '../db/database'
 import { attendanceRepository } from '../db/attendanceRepository'
 import { attendanceService } from './attendanceService'
 import { studentService } from './studentService'
-import { computeStats } from './statisticsService'
+import { computeEvaluationStats, computeStats } from './statisticsService'
 import { BackupError, buildDayCsv, createBackup, parseBackupText, restoreBackup } from './backupService'
 import { parseNamesBlock } from '../utils/normalizeName'
+import { parseEvaluationNumber } from '../utils/evaluation'
 
 beforeEach(async () => {
   await Promise.all([db.students.clear(), db.attendanceDays.clear(), db.attendanceRecords.clear(), db.settings.clear()])
@@ -94,6 +97,65 @@ describe('التفقد', () => {
     const prev = await attendanceService.unconfirmedDaysBefore('2026-10-23')
     expect(prev).toHaveLength(1)
   })
+
+  it('يحفظ التقييم بالتقريب ولا يمسحه عند تغيير الحالة', async () => {
+    await seed(['أ'])
+    const day = await attendanceService.startOrGetDay('2026-10-23')
+    const [student] = await db.students.toArray()
+    await attendanceService.setStatus(day.id, student.id, 'present')
+    await attendanceService.setEvaluation(day.id, student.id, { dictationScore: 7.24, behaviorScore: 8.6, homework: 'partial' })
+    await attendanceService.setStatus(day.id, student.id, 'absent')
+    const record = (await attendanceRepository.record(day.id, student.id))!
+    expect(record).toMatchObject({ dictationScore: 7, behaviorScore: 9, homework: 'partial' })
+  })
+
+  it('يرفض التقييم خارج النطاق ويحدد الوظيفة للحاضرين غير المحددين فقط', async () => {
+    await seed(['أ', 'ب', 'ج'])
+    const day = await attendanceService.startOrGetDay('2026-10-23')
+    const students = await db.students.toArray()
+    await attendanceService.setStatus(day.id, students[0].id, 'present')
+    await attendanceService.setStatus(day.id, students[1].id, 'late')
+    await attendanceService.setStatus(day.id, students[2].id, 'absent')
+    await attendanceService.setEvaluation(day.id, students[1].id, { homework: 'partial' })
+    await expect(attendanceService.setEvaluation(day.id, students[0].id, { dictationScore: 11 })).rejects.toThrow('بين 0 و10')
+    expect(await attendanceService.markAllHomeworkDone(day.id)).toBe(1)
+    expect((await attendanceRepository.record(day.id, students[1].id))!.homework).toBe('partial')
+    expect((await attendanceRepository.record(day.id, students[2].id))!.homework).toBe(null)
+  })
+
+  it('يحسب متوسطات التقييم والسلوك الافتراضي', async () => {
+    await seed(['أ', 'ب', 'ج'])
+    const day = await attendanceService.startOrGetDay('2026-10-23')
+    const students = await db.students.toArray()
+    await attendanceService.setDayOptions(day.id, { hasDictation: true, hasHomework: true })
+    await attendanceService.setStatus(day.id, students[0].id, 'present')
+    await attendanceService.setStatus(day.id, students[1].id, 'late')
+    await attendanceService.setEvaluation(day.id, students[0].id, { dictationScore: 8, behaviorScore: 6, homework: 'done' })
+    const records = await attendanceRepository.recordsForDay(day.id)
+    expect(computeEvaluationStats({ hasDictation: true, hasHomework: true }, records)).toMatchObject({ averageDictation: 8, averageBehavior: 8, homeworkDone: 1, homeworkUnmarked: 1 })
+  })
+})
+
+describe('الترقية وتحليل الأرقام', () => {
+  it('يرقي قاعدة الإصدار الأول دون فقد البيانات', async () => {
+    const name = `tafaqqud-migration-${crypto.randomUUID()}`
+    const legacy = new Dexie(name)
+    legacy.version(1).stores({ students: 'id, active, normalizedName', attendanceDays: 'id, &date, status', attendanceRecords: 'id, dayId, studentId, &[dayId+studentId]', settings: 'key' })
+    await legacy.open()
+    await legacy.table('attendanceDays').add({ id: 'day', date: '2026-10-23', status: 'draft', createdAt: '', confirmedAt: null, updatedAt: '' })
+    legacy.close()
+    const upgraded = new TafaqqudDB(name)
+    await upgraded.open()
+    expect(await upgraded.attendanceDays.get('day')).toMatchObject({ hasDictation: false, hasHomework: false })
+    await upgraded.delete()
+  })
+
+  it('يحلل الأرقام العربية والفواصل ويطبق النطاق', () => {
+    expect(parseEvaluationNumber('٧٫٥')).toBe(7.5)
+    expect(parseEvaluationNumber('8,5')).toBe(8.5)
+    expect(parseEvaluationNumber('11')).toBe(null)
+    expect(parseEvaluationNumber('abc')).toBe(null)
+  })
 })
 
 describe('النسخ الاحتياطي', () => {
@@ -115,6 +177,23 @@ describe('النسخ الاحتياطي', () => {
     expect(() =>
       parseBackupText(JSON.stringify({ format: 'tafaqqud-backup', version: 99, createdAt: '', students: [], days: [], records: [] })),
     ).toThrow(BackupError)
+  })
+
+  it('يستورد النسخة الأولى ويطبع الحقول الجديدة بقيم افتراضية', () => {
+    const legacy = { format: 'tafaqqud-backup', version: 1, createdAt: '2026-10-23T00:00:00.000Z', settings: {}, students: [], days: [], records: [] }
+    expect(parseBackupText(JSON.stringify(legacy))).toMatchObject({ version: 2, days: [], records: [] })
+    const current = { ...legacy, version: 2 }
+    expect(parseBackupText(JSON.stringify(current)).version).toBe(2)
+  })
+
+  it('يرفض قيماً جديدة غير صالحة في النسخة الاحتياطية', () => {
+    const invalid = {
+      format: 'tafaqqud-backup', version: 2, createdAt: '2026-10-23T00:00:00.000Z', settings: {},
+      students: [{ id: 's', name: 'أ', active: 1 }],
+      days: [{ id: 'd', date: '2026-10-23', status: 'draft', hasDictation: true, hasHomework: false }],
+      records: [{ id: 'r', dayId: 'd', studentId: 's', status: 'present', dictationScore: 10.25 }],
+    }
+    expect(() => parseBackupText(JSON.stringify(invalid))).toThrow('علامة الإملاء')
   })
 
   it('الاستيراد المرفوض لا يغيّر البيانات الحالية', async () => {

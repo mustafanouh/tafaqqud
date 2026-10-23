@@ -8,6 +8,8 @@ export interface AttendanceDay {
   createdAt: string
   confirmedAt: string | null
   updatedAt: string
+  hasDictation: boolean
+  hasHomework: boolean
 }
 
 export interface AttendanceRecord {
@@ -19,6 +21,15 @@ export interface AttendanceRecord {
   note: string
   createdAt: string
   updatedAt: string
+  dictationScore: number | null
+  homework: HomeworkStatus | null
+  behaviorScore: number | null
+}
+
+export type HomeworkStatus = 'done' | 'partial' | 'none'
+
+export function effectiveBehavior(record: Pick<AttendanceRecord, 'behaviorScore'>): number {
+  return record.behaviorScore ?? 10
 }
 
 export interface DayStats {

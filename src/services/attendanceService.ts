@@ -1,6 +1,6 @@
 import { db, newId } from '../db/database'
 import { attendanceRepository } from '../db/attendanceRepository'
-import type { AttendanceDay, AttendanceRecord, RecordStatus } from '../types/attendance'
+import type { AttendanceDay, AttendanceRecord, HomeworkStatus, RecordStatus } from '../types/attendance'
 import { nowIso, todayLocal } from '../utils/date'
 
 export const attendanceService = {
@@ -20,6 +20,8 @@ export const attendanceService = {
         createdAt: now,
         confirmedAt: null,
         updatedAt: now,
+        hasDictation: false,
+        hasHomework: false,
       }
       await db.attendanceDays.add(day)
       const students = await db.students.where('active').equals(1).toArray()
@@ -31,6 +33,9 @@ export const attendanceService = {
         note: '',
         createdAt: now,
         updatedAt: now,
+        dictationScore: null,
+        homework: null,
+        behaviorScore: null,
       }))
       await db.attendanceRecords.bulkAdd(records)
       return day
@@ -59,6 +64,9 @@ export const attendanceService = {
           note: '',
           createdAt: now,
           updatedAt: now,
+          dictationScore: null,
+          homework: null,
+          behaviorScore: null,
         })
       }
       await db.attendanceDays.update(dayId, { updatedAt: now })
@@ -80,9 +88,62 @@ export const attendanceService = {
           note: note.trim(),
           createdAt: now,
           updatedAt: now,
+          dictationScore: null,
+          homework: null,
+          behaviorScore: null,
         })
       }
       await db.attendanceDays.update(dayId, { updatedAt: now })
+    })
+  },
+
+  async setDayOptions(dayId: string, options: { hasDictation?: boolean; hasHomework?: boolean }): Promise<void> {
+    await db.transaction('rw', db.attendanceDays, async () => {
+      const day = await db.attendanceDays.get(dayId)
+      if (!day) throw new Error('يوم التفقد غير موجود')
+      await db.attendanceDays.update(dayId, { ...options, updatedAt: nowIso() })
+    })
+  },
+
+  async setEvaluation(
+    dayId: string,
+    studentId: string,
+    evaluation: { dictationScore?: number | null; homework?: HomeworkStatus | null; behaviorScore?: number | null },
+  ): Promise<void> {
+    if (evaluation.dictationScore !== undefined && evaluation.dictationScore !== null) {
+      if (!Number.isFinite(evaluation.dictationScore) || evaluation.dictationScore < 0 || evaluation.dictationScore > 10) {
+        throw new Error('علامة الإملاء يجب أن تكون بين 0 و10')
+      }
+      evaluation.dictationScore = Math.round(evaluation.dictationScore * 2) / 2
+    }
+    if (evaluation.behaviorScore !== undefined && evaluation.behaviorScore !== null) {
+      if (!Number.isFinite(evaluation.behaviorScore) || evaluation.behaviorScore < 0 || evaluation.behaviorScore > 10) {
+        throw new Error('السلوك يجب أن يكون بين 0 و10')
+      }
+      evaluation.behaviorScore = Math.round(evaluation.behaviorScore)
+    }
+    if (evaluation.homework !== undefined && evaluation.homework !== null && !['done', 'partial', 'none'].includes(evaluation.homework)) {
+      throw new Error('حالة الوظيفة غير صالحة')
+    }
+    await db.transaction('rw', db.attendanceDays, db.attendanceRecords, async () => {
+      const record = await attendanceRepository.record(dayId, studentId)
+      if (!record) throw new Error('سجل الطالب غير موجود في هذا اليوم')
+      const now = nowIso()
+      await db.attendanceRecords.update(record.id, { ...evaluation, updatedAt: now })
+      await db.attendanceDays.update(dayId, { updatedAt: now })
+    })
+  },
+
+  async markAllHomeworkDone(dayId: string): Promise<number> {
+    return db.transaction('rw', db.attendanceDays, db.attendanceRecords, async () => {
+      const day = await db.attendanceDays.get(dayId)
+      if (!day) throw new Error('يوم التفقد غير موجود')
+      const records = await attendanceRepository.recordsForDay(dayId)
+      const eligible = records.filter((record) => (record.status === 'present' || record.status === 'late') && record.homework === null)
+      const now = nowIso()
+      for (const record of eligible) await db.attendanceRecords.update(record.id, { homework: 'done', updatedAt: now })
+      if (eligible.length) await db.attendanceDays.update(dayId, { updatedAt: now })
+      return eligible.length
     })
   },
 

@@ -2,9 +2,8 @@ import { useMemo, useState } from 'react'
 import { CheckCheck, Download, Printer } from 'lucide-react'
 import { useDayView } from '../hooks/useDailyAttendance'
 import { attendanceService } from '../services/attendanceService'
-import { buildDayCsv } from '../services/backupService'
+import { downloadAttendancePdf } from '../services/pdfReportService'
 import { STATUS_LABEL, type RecordStatus } from '../types/attendance'
-import { downloadText } from '../utils/csv'
 import { formatDateAr } from '../utils/date'
 import { normalizeName } from '../utils/normalizeName'
 import AttendanceSummary from './AttendanceSummary'
@@ -12,8 +11,10 @@ import ConfirmDialog from './ConfirmDialog'
 import EmptyState from './EmptyState'
 import SearchInput from './SearchInput'
 import StudentCard from './StudentCard'
+import StudentEvaluationCard from './StudentEvaluationCard'
 
 type Filter = 'all' | 'unmarked'
+type ViewMode = 'attendance' | 'evaluation'
 
 export default function DayAttendanceView({ dayId }: { dayId: string }) {
   const view = useDayView(dayId)
@@ -23,6 +24,8 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
   const [unmarkedCount, setUnmarkedCount] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [mode, setMode] = useState<ViewMode>('attendance')
+  const [evaluationInfo, setEvaluationInfo] = useState('')
 
   const rows = useMemo(() => {
     if (!view) return []
@@ -63,11 +66,24 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
     setBusy(false)
   }
 
-  const exportCsv = () =>
+  const exportPdf = async () => {
+    if (busy) return
+    setBusy(true)
+    await guard(() => downloadAttendancePdf(day.id))
+    setBusy(false)
+  }
+
+  const saveDayOption = (option: 'hasDictation' | 'hasHomework', value: boolean) =>
+    guard(() => attendanceService.setDayOptions(day.id, { [option]: value }))
+
+  const markHomeworkDone = () =>
     guard(async () => {
-      const { filename, content } = await buildDayCsv(day.id)
-      downloadText(filename, content, 'text/csv')
+      const count = await attendanceService.markAllHomeworkDone(day.id)
+      setEvaluationInfo(`تم تحديد الوظيفة «كتب» لـ ${count.toLocaleString('ar-SY')} طالب`)
     })
+
+  const evaluationRows = view.rows.filter((row) => row.record.status === 'present' || row.record.status === 'late')
+  const notEvaluatedCount = view.rows.length - evaluationRows.length
 
   return (
     <div className="space-y-3">
@@ -82,8 +98,9 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
           <button className="btn-secondary px-3" onClick={() => window.print()} aria-label="طباعة">
             <Printer size={18} aria-hidden />
           </button>
-          <button className="btn-secondary px-3" onClick={exportCsv} aria-label="تصدير CSV">
+          <button className="btn-secondary px-3" onClick={exportPdf} disabled={busy} aria-label="تنزيل PDF">
             <Download size={18} aria-hidden />
+            <span>{busy ? 'جارٍ التجهيز…' : 'تنزيل PDF'}</span>
           </button>
         </div>
       </div>
@@ -96,7 +113,12 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
         </div>
       )}
 
-      <div className="no-print space-y-2">
+      <div className="no-print grid grid-cols-2 gap-2">
+        <button className={mode === 'attendance' ? 'btn-primary' : 'btn-secondary'} onClick={() => setMode('attendance')}>حضور</button>
+        <button className={mode === 'evaluation' ? 'btn-primary' : 'btn-secondary'} onClick={() => setMode('evaluation')}>تقييم</button>
+      </div>
+
+      {mode === 'attendance' ? <div className="no-print space-y-2">
         <SearchInput value={query} onChange={setQuery} />
         <div className="grid grid-cols-2 gap-2">
           <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>
@@ -111,9 +133,33 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
             <CheckCheck size={18} aria-hidden /> اعتماد التفقد
           </button>
         )}
-      </div>
+      </div> : (
+        <div className="no-print space-y-3">
+          <div className="card space-y-2 p-3">
+            <label className="flex min-h-[44px] items-center justify-between gap-2 font-semibold">
+              يوجد إملاء اليوم
+              <input type="checkbox" className="h-5 w-5" checked={day.hasDictation} onChange={(event) => saveDayOption('hasDictation', event.target.checked)} />
+            </label>
+            <label className="flex min-h-[44px] items-center justify-between gap-2 font-semibold">
+              يوجد وظيفة اليوم
+              <input type="checkbox" className="h-5 w-5" checked={day.hasHomework} onChange={(event) => saveDayOption('hasHomework', event.target.checked)} />
+            </label>
+          </div>
+          <SearchInput value={query} onChange={setQuery} />
+          {day.hasHomework && <button className="btn-secondary w-full" onClick={markHomeworkDone}>الكل كتب الوظيفة</button>}
+          {evaluationInfo && <p className="rounded-xl bg-green-50 p-2 text-sm text-green-800">{evaluationInfo}</p>}
+          <p className="text-sm text-gray-600">لا يُقيَّم {notEvaluatedCount.toLocaleString('ar-SY')} طالب لأنهم غير حاضرين</p>
+          {evaluationRows.length === 0 ? <EmptyState title="لا يوجد طلاب حاضرون للتقييم" /> : (
+            <ul className="space-y-2">
+              {evaluationRows.filter(({ student }) => !normalizeName(query) || student.normalizedName.includes(normalizeName(query))).map(({ record, student }) => (
+                <StudentEvaluationCard key={record.id} student={student} record={record} hasDictation={day.hasDictation} hasHomework={day.hasHomework} onChange={(evaluation) => guard(() => attendanceService.setEvaluation(day.id, student.id, evaluation))} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
-      {rows.length === 0 ? (
+      {mode === 'attendance' && (rows.length === 0 ? (
         <EmptyState title={view.rows.length === 0 ? 'لا يوجد طلاب في هذا اليوم' : 'لا توجد نتائج'} />
       ) : (
         <ul className="space-y-2">
@@ -127,23 +173,31 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
             />
           ))}
         </ul>
-      )}
+      ))}
 
       {/* جدول مخصص للطباعة فقط */}
       <table className="hidden w-full border-collapse text-sm print:table">
         <thead>
           <tr>
+            <th className="border p-1 text-start">الرقم</th>
             <th className="border p-1 text-start">الاسم</th>
             <th className="border p-1 text-start">الحالة</th>
             <th className="border p-1 text-start">ملاحظة</th>
+            {day.hasDictation && <th className="border p-1 text-start">الإملاء</th>}
+            {day.hasHomework && <th className="border p-1 text-start">الوظيفة</th>}
+            <th className="border p-1 text-start">السلوك</th>
           </tr>
         </thead>
         <tbody>
-          {view.rows.map(({ record, student }) => (
+          {view.rows.map(({ record, student }, index) => (
             <tr key={record.id}>
+              <td className="border p-1">{index + 1}</td>
               <td className="border p-1">{student.name}</td>
               <td className="border p-1">{STATUS_LABEL[record.status]}</td>
               <td className="border p-1">{record.note}</td>
+              {day.hasDictation && <td className="border p-1">{record.status === 'present' || record.status === 'late' ? record.dictationScore ?? '—' : '—'}</td>}
+              {day.hasHomework && <td className="border p-1">{record.status === 'present' || record.status === 'late' ? record.homework ?? '—' : '—'}</td>}
+              <td className="border p-1">{record.status === 'present' || record.status === 'late' ? record.behaviorScore ?? 10 : '—'}</td>
             </tr>
           ))}
         </tbody>

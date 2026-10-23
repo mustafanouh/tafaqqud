@@ -1,14 +1,14 @@
 import { db } from '../db/database'
 import { getAllSettings, setSetting, SETTING_KEYS } from '../db/settingsRepository'
 import { BACKUP_FORMAT, BACKUP_VERSION, type BackupFile } from '../types/backup'
-import { STATUS_LABEL, type AttendanceDay, type AttendanceRecord, type RecordStatus } from '../types/attendance'
+import { STATUS_LABEL, type AttendanceDay, type AttendanceRecord, type HomeworkStatus, type RecordStatus } from '../types/attendance'
 import type { Student } from '../types/student'
 import { isValidDateString, nowIso } from '../utils/date'
 import { toCsv } from '../utils/csv'
 
 const RECORD_STATUSES: RecordStatus[] = ['unmarked', 'present', 'absent', 'late']
 
-export class BackupError extends Error {}
+export class BackupError extends Error { }
 
 export async function createBackup(): Promise<BackupFile> {
   const [settings, students, days, records] = await Promise.all([
@@ -31,7 +31,7 @@ const isStr = (v: unknown): v is string => typeof v === 'string'
 export function validateBackup(raw: unknown): BackupFile {
   if (!isObj(raw)) throw new BackupError('الملف ليس نسخة احتياطية صالحة')
   if (raw.format !== BACKUP_FORMAT) throw new BackupError('هذا الملف ليس نسخة احتياطية من تطبيق تفقد')
-  if (raw.version !== BACKUP_VERSION) throw new BackupError(`إصدار النسخة غير مدعوم (${String(raw.version)})`)
+  if (raw.version !== 1 && raw.version !== BACKUP_VERSION) throw new BackupError(`إصدار النسخة غير مدعوم (${String(raw.version)})`)
   if (!isStr(raw.createdAt)) throw new BackupError('تاريخ إنشاء النسخة مفقود')
   if (!Array.isArray(raw.students) || !Array.isArray(raw.days) || !Array.isArray(raw.records)) {
     throw new BackupError('بنية الملف غير صحيحة')
@@ -68,6 +68,8 @@ export function validateBackup(raw: unknown): BackupFile {
       throw new BackupError(`بيانات اليوم رقم ${i + 1} غير صالحة`)
     }
     if (d.status !== 'draft' && d.status !== 'confirmed') throw new BackupError(`حالة اليوم ${d.date} غير صالحة`)
+    if (d.hasDictation !== undefined && typeof d.hasDictation !== 'boolean') throw new BackupError(`خيار الإملاء في اليوم ${d.date} غير صالح`)
+    if (d.hasHomework !== undefined && typeof d.hasHomework !== 'boolean') throw new BackupError(`خيار الوظيفة في اليوم ${d.date} غير صالح`)
     if (dayIds.has(d.id) || dates.has(d.date)) throw new BackupError('يوجد يوم مكرر في الملف')
     dayIds.add(d.id)
     dates.add(d.date)
@@ -78,6 +80,8 @@ export function validateBackup(raw: unknown): BackupFile {
       createdAt: isStr(d.createdAt) ? d.createdAt : nowIso(),
       confirmedAt: isStr(d.confirmedAt) ? d.confirmedAt : null,
       updatedAt: isStr(d.updatedAt) ? d.updatedAt : nowIso(),
+      hasDictation: d.hasDictation === true,
+      hasHomework: d.hasHomework === true,
     }
   })
 
@@ -94,6 +98,17 @@ export function validateBackup(raw: unknown): BackupFile {
     if (pairs.has(pair) || recordIds.has(r.id)) throw new BackupError('يوجد سجل حضور مكرر في الملف')
     pairs.add(pair)
     recordIds.add(r.id)
+    const dictationScore = r.dictationScore === null || r.dictationScore === undefined ? null : r.dictationScore
+    const behaviorScore = r.behaviorScore === null || r.behaviorScore === undefined ? null : r.behaviorScore
+    if (dictationScore !== null && (typeof dictationScore !== 'number' || !Number.isFinite(dictationScore) || dictationScore < 0 || dictationScore > 10 || Math.round(dictationScore * 2) !== dictationScore * 2)) {
+      throw new BackupError(`علامة الإملاء في السجل رقم ${i + 1} غير صالحة`)
+    }
+    if (behaviorScore !== null && (typeof behaviorScore !== 'number' || !Number.isInteger(behaviorScore) || behaviorScore < 0 || behaviorScore > 10)) {
+      throw new BackupError(`علامة السلوك في السجل رقم ${i + 1} غير صالحة`)
+    }
+    if (r.homework !== undefined && r.homework !== null && !(['done', 'partial', 'none'] as HomeworkStatus[]).includes(r.homework as HomeworkStatus)) {
+      throw new BackupError(`حالة الوظيفة في السجل رقم ${i + 1} غير صالحة`)
+    }
     return {
       id: r.id,
       dayId: r.dayId,
@@ -102,6 +117,9 @@ export function validateBackup(raw: unknown): BackupFile {
       note: isStr(r.note) ? r.note : '',
       createdAt: isStr(r.createdAt) ? r.createdAt : nowIso(),
       updatedAt: isStr(r.updatedAt) ? r.updatedAt : nowIso(),
+      dictationScore,
+      homework: (r.homework as HomeworkStatus | null | undefined) ?? null,
+      behaviorScore,
     }
   })
 
@@ -139,10 +157,10 @@ export async function buildDayCsv(dayId: string): Promise<{ filename: string; co
     .map((r) => ({ r, s: students.get(r.studentId) }))
     .filter((x): x is { r: AttendanceRecord; s: Student } => !!x.s)
     .sort((a, b) => a.s.name.localeCompare(b.s.name, 'ar'))
-    .map(({ r, s }) => [s.name, day.date, STATUS_LABEL[r.status], r.note, s.notes])
+    .map(({ r, s }) => [s.name, day.date, STATUS_LABEL[r.status], r.note, s.notes, r.dictationScore === null ? '' : String(r.dictationScore), r.homework ?? '', r.behaviorScore === null ? '' : String(r.behaviorScore)])
   return {
     filename: `tafaqqud-${day.date}.csv`,
-    content: toCsv([['اسم الطالب', 'التاريخ', 'الحالة', 'ملاحظة الحضور', 'ملاحظة الطالب'], ...rows]),
+    content: toCsv([['اسم الطالب', 'التاريخ', 'الحالة', 'ملاحظة الحضور', 'ملاحظة الطالب', 'الإملاء', 'الوظيفة', 'السلوك'], ...rows]),
   }
 }
 
@@ -159,9 +177,9 @@ export async function buildAllCsv(): Promise<{ filename: string; content: string
     .map((r) => ({ r, d: dayMap.get(r.dayId), s: stuMap.get(r.studentId) }))
     .filter((x) => x.d && x.s)
     .sort((a, b) => b.d!.date.localeCompare(a.d!.date) || a.s!.name.localeCompare(b.s!.name, 'ar'))
-    .map(({ r, d, s }) => [s!.name, d!.date, STATUS_LABEL[r.status], r.note, s!.notes])
+    .map(({ r, d, s }) => [s!.name, d!.date, STATUS_LABEL[r.status], r.note, s!.notes, r.dictationScore === null ? '' : String(r.dictationScore), r.homework ?? '', r.behaviorScore === null ? '' : String(r.behaviorScore)])
   return {
     filename: 'tafaqqud-all.csv',
-    content: toCsv([['اسم الطالب', 'التاريخ', 'الحالة', 'ملاحظة الحضور', 'ملاحظة الطالب'], ...rows]),
+    content: toCsv([['اسم الطالب', 'التاريخ', 'الحالة', 'ملاحظة الحضور', 'ملاحظة الطالب', 'الإملاء', 'الوظيفة', 'السلوك'], ...rows]),
   }
 }
