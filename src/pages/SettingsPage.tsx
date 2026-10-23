@@ -47,7 +47,7 @@ export default function SettingsPage() {
       <h2 className="text-xl font-bold">الإعدادات</h2>
       <div className="card space-y-3 p-4">
         <input className="input" placeholder="اسم المدرسة (اختياري)" value={school} onChange={(e) => setSchool(e.target.value)} aria-label="اسم المدرسة" />
-        <input className="input" placeholder="اسم الشعبة (اختياري)" value={section} onChange={(e) => setSection(e.target.value)} aria-label="اسم الشعبة" />
+        <input className="input" placeholder="الصف و الشعبة (اختياري)" value={section} onChange={(e) => setSection(e.target.value)} aria-label="اسم الشعبة" />
         <input className="input" placeholder="اسم المدرس (اختياري)" value={teacher} onChange={(e) => setTeacher(e.target.value)} aria-label="اسم المدرس" />
         <button className="btn-primary w-full" onClick={save}>
           حفظ
@@ -63,10 +63,13 @@ export default function SettingsPage() {
         <p>إصدار التطبيق: {APP_VERSION}</p>
         {usage && <p>المساحة المستخدمة تقريباً: {usage}</p>}
         <p>البيانات محلية على هذا الجهاز ولا تُرسل إلى أي خدمة. الوصول إلى الجهاز أو المتصفح يعني الوصول إلى البيانات.</p>
+       <p> تم الانشاء بواسطة: م.مصطفى نوح</p>
       </div>
       <Link to="/backup" className="btn-secondary w-full">
         الانتقال إلى النسخ الاحتياطي
-      </Link>
+      </Link>git add .
+git commit -m "chore: bump version"
+git push
     </div>
   )
 }
