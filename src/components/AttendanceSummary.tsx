@@ -1,6 +1,7 @@
+import { memo } from 'react'
 import type { DayStats } from '../types/attendance'
 
-export default function AttendanceSummary({ stats }: { stats: DayStats }) {
+function AttendanceSummaryComponent({ stats }: { stats: DayStats }) {
   const cells = [
     { label: 'حاضر', value: stats.present, cls: 'bg-green-50 text-green-800 border-green-200' },
     { label: 'غائب', value: stats.absent, cls: 'bg-red-50 text-red-800 border-red-200' },
@@ -18,3 +19,13 @@ export default function AttendanceSummary({ stats }: { stats: DayStats }) {
     </div>
   )
 }
+
+const AttendanceSummary = memo(AttendanceSummaryComponent, (prev, next) => (
+  prev.stats.total === next.stats.total &&
+  prev.stats.present === next.stats.present &&
+  prev.stats.absent === next.stats.absent &&
+  prev.stats.late === next.stats.late &&
+  prev.stats.unmarked === next.stats.unmarked
+))
+
+export default AttendanceSummary

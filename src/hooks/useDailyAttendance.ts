@@ -22,7 +22,12 @@ export function useDayView(dayId: string | undefined): DayView | undefined {
       if (!dayId) return { day: undefined, rows: [], stats: computeStats([]) }
       const day = await db.attendanceDays.get(dayId)
       const records = await db.attendanceRecords.where('dayId').equals(dayId).toArray()
-      const students = new Map((await db.students.toArray()).map((s) => [s.id, s]))
+      const studentIds = records.map((r) => r.studentId)
+      const studentsList = await db.students.bulkGet(studentIds)
+      const students = new Map<string, Student>()
+      for (const s of studentsList) {
+        if (s) students.set(s.id, s)
+      }
       const rows = records
         .map((record) => ({ record, student: students.get(record.studentId) }))
         .filter((r): r is AttendanceRow => !!r.student)

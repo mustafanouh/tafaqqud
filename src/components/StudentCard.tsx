@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { StickyNote } from 'lucide-react'
 import type { AttendanceRecord, RecordStatus } from '../types/attendance'
 import type { Student } from '../types/student'
@@ -8,19 +8,38 @@ import StatusBadge from './StatusBadge'
 interface Props {
   student: Student
   record: AttendanceRecord
-  onStatus: (s: RecordStatus) => Promise<void> | void
-  onNote: (note: string) => Promise<void> | void
+  onStatus: (student: Student, record: AttendanceRecord, s: RecordStatus) => Promise<void> | void
+  onNote: (studentId: string, note: string) => Promise<void> | void
+}
+
+function areStudentCardPropsEqual(prevProps: Props, nextProps: Props): boolean {
+  return (
+    prevProps.record.id === nextProps.record.id &&
+    prevProps.record.status === nextProps.record.status &&
+    prevProps.record.note === nextProps.record.note &&
+    prevProps.record.updatedAt === nextProps.record.updatedAt &&
+    prevProps.student.id === nextProps.student.id &&
+    prevProps.student.name === nextProps.student.name &&
+    prevProps.student.notes === nextProps.student.notes &&
+    prevProps.student.updatedAt === nextProps.student.updatedAt &&
+    prevProps.onStatus === nextProps.onStatus &&
+    prevProps.onNote === nextProps.onNote
+  )
 }
 
 /** بطاقة طالب في شاشة التفقد: الاسم، الحالة، أزرار الحالة، وخانة ملاحظة الحضور */
-export default function StudentCard({ student, record, onStatus, onNote }: Props) {
+function StudentCardComponent({ student, record, onStatus, onNote }: Props) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(record.note)
   const unmarked = record.status === 'unmarked'
 
   const saveNote = async () => {
     setEditing(false)
-    if (draft.trim() !== record.note) await onNote(draft)
+    if (draft.trim() !== record.note) await onNote(student.id, draft)
+  }
+
+  const handleStatusChange = (s: RecordStatus) => {
+    void onStatus(student, record, s)
   }
 
   return (
@@ -33,7 +52,7 @@ export default function StudentCard({ student, record, onStatus, onNote }: Props
         <StatusBadge status={record.status} />
       </div>
 
-      <AttendanceActions status={record.status} onChange={onStatus} />
+      <AttendanceActions status={record.status} onChange={handleStatusChange} />
 
       {editing ? (
         <div className="mt-2 space-y-2">
@@ -77,3 +96,6 @@ export default function StudentCard({ student, record, onStatus, onNote }: Props
     </li>
   )
 }
+
+const StudentCard = memo(StudentCardComponent, areStudentCardPropsEqual)
+export default StudentCard

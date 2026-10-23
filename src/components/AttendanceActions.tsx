@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { CheckCircle2, Clock, XCircle } from 'lucide-react'
 import type { RecordStatus } from '../types/attendance'
 
@@ -13,7 +14,7 @@ const options: { value: RecordStatus; label: string; Icon: typeof CheckCircle2; 
   { value: 'absent', label: 'غائب', Icon: XCircle, on: 'bg-red-700 border-red-700 text-white' },
 ]
 
-export default function AttendanceActions({ status, disabled, onChange }: Props) {
+function AttendanceActionsComponent({ status, disabled, onChange }: Props) {
   return (
     <div className="grid grid-cols-3 gap-2" role="group" aria-label="تحديد الحالة">
       {options.map(({ value, label, Icon, on }) => {
@@ -35,3 +36,11 @@ export default function AttendanceActions({ status, disabled, onChange }: Props)
     </div>
   )
 }
+
+const AttendanceActions = memo(AttendanceActionsComponent, (prev, next) => (
+  prev.status === next.status &&
+  prev.disabled === next.disabled &&
+  prev.onChange === next.onChange
+))
+
+export default AttendanceActions
