@@ -1,12 +1,12 @@
 import { NavLink } from 'react-router-dom'
-import { ClipboardCheck, History, Home, Save, Settings, Users } from 'lucide-react'
+import { ClipboardCheck, GraduationCap, History, Home, Settings, Users } from 'lucide-react'
 
 const items = [
   { to: '/', label: 'الرئيسية', icon: Home, end: true },
   { to: '/attendance', label: 'التفقد', icon: ClipboardCheck, end: false },
   { to: '/students', label: 'الطلاب', icon: Users, end: false },
   { to: '/history', label: 'السجل', icon: History, end: false },
-  { to: '/backup', label: 'النسخ', icon: Save, end: false },
+  { to: '/grades', label: 'العلامات', icon: GraduationCap, end: false },
   { to: '/settings', label: 'الإعدادات', icon: Settings, end: false },
 ]
 

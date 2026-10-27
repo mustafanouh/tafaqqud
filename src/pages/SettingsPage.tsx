@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { RefreshCw, Trash2 } from 'lucide-react'
+import BackupSection from '../components/BackupSection'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { db } from '../db/database'
 import { SETTING_KEYS, getAllSettings, setSetting } from '../db/settingsRepository'
 
-const APP_VERSION = '1.0.0'
+const APP_VERSION = '1.1.0'
 
 export default function SettingsPage() {
+  const location = useLocation()
   const saved = useLiveQuery(getAllSettings, [])
   const [school, setSchool] = useState('')
   const [section, setSection] = useState('')
@@ -25,6 +27,10 @@ export default function SettingsPage() {
     setSection(saved[SETTING_KEYS.section] ?? '')
     setTeacher(saved[SETTING_KEYS.teacher] ?? '')
   }, [saved])
+
+  useEffect(() => {
+    if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView()
+  }, [location.hash])
 
   const refreshUsage = () => {
     navigator.storage?.estimate?.().then((e) => {
@@ -75,6 +81,8 @@ export default function SettingsPage() {
         db.attendanceDays.clear(),
         db.attendanceRecords.clear(),
         db.settings.clear(),
+        db.assessments.clear(),
+        db.grades.clear(),
       ])
       setSchool('')
       setSection('')
@@ -123,9 +131,7 @@ export default function SettingsPage() {
         <p>تم الإنشاء بواسطة: م.مصطفى نوح</p>
       </div>
 
-      <Link to="/backup" className="btn-secondary w-full">
-        الانتقال إلى النسخ الاحتياطي
-      </Link>
+      <BackupSection />
 
       <div className="card space-y-3 p-4 border-red-200 bg-red-50/40">
         <h3 className="font-bold text-red-800 flex items-center gap-2">
@@ -158,10 +164,10 @@ export default function SettingsPage() {
             تحذير: هذا الإجراء لا يمكن التراجع عنه!
           </p>
           <p>
-            سيتم مسح كافة أسماء الطلاب وسجلات تفقد الأيام والإعدادات من ذاكرة هذا الهاتف بشكل كامل.
+            سيتم مسح كافة أسماء الطلاب وسجلات تفقد الأيام والعلامات والإعدادات من ذاكرة هذا الهاتف بشكل كامل.
           </p>
           <p className="text-gray-500">
-            إذا كنت بحاجة للاحتفاظ بالبيانات الحالية، يُرجى تصدير نسخة احتياطية من شاشة «النسخ الاحتياطي» أولاً.
+            إذا كنت بحاجة للاحتفاظ بالبيانات الحالية، يُرجى تصدير نسخة احتياطية من قسم «النسخ الاحتياطي» أعلاه أولاً.
           </p>
         </div>
       </ConfirmDialog>

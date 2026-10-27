@@ -1,14 +1,14 @@
 import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AlertTriangle, Download, FileSpreadsheet, Upload } from 'lucide-react'
-import ConfirmDialog from '../components/ConfirmDialog'
+import ConfirmDialog from './ConfirmDialog'
 import { SETTING_KEYS, getSetting } from '../db/settingsRepository'
 import { BackupError, buildAllCsv, createBackup, markExported, parseBackupText, restoreBackup } from '../services/backupService'
 import type { BackupFile } from '../types/backup'
 import { downloadText } from '../utils/csv'
 import { formatDateTimeAr, todayLocal } from '../utils/date'
 
-export default function BackupPage() {
+export default function BackupSection() {
   const lastExport = useLiveQuery(() => getSetting(SETTING_KEYS.lastExport), [])
   const fileRef = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState<BackupFile | null>(null)
@@ -71,8 +71,8 @@ export default function BackupPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-bold">النسخ الاحتياطي</h2>
+    <section id="backup" className="space-y-4 scroll-mt-4">
+      <h3 className="text-lg font-bold">النسخ الاحتياطي</h3>
 
       <div className="flex items-start gap-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-orange-900">
         <AlertTriangle size={20} className="mt-0.5 shrink-0" aria-hidden />
@@ -113,7 +113,7 @@ export default function BackupPage() {
           <>
             <p>
               الملف يحتوي {pending.students.length.toLocaleString('ar-SY')} طالب، {pending.days.length.toLocaleString('ar-SY')} يوم،{' '}
-              {pending.records.length.toLocaleString('ar-SY')} سجل حضور (بتاريخ {formatDateTimeAr(pending.createdAt)}).
+              {pending.records.length.toLocaleString('ar-SY')} سجل حضور، {pending.assessments.length.toLocaleString('ar-SY')} اختبار و{pending.grades.length.toLocaleString('ar-SY')} علامة (بتاريخ {formatDateTimeAr(pending.createdAt)}).
             </p>
             <p className="font-semibold text-red-700">
               تحذير: سيتم حذف كل البيانات الحالية على هذا الجهاز واستبدالها بمحتوى الملف. لا يتم الدمج.
@@ -121,6 +121,6 @@ export default function BackupPage() {
           </>
         )}
       </ConfirmDialog>
-    </div>
+    </section>
   )
 }

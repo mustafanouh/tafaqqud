@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Pencil, Plus, RotateCcw, UserMinus, Users } from 'lucide-react'
 import ConfirmDialog from '../components/ConfirmDialog'
 import EmptyState from '../components/EmptyState'
@@ -176,7 +177,9 @@ export default function StudentsPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-lg font-bold break-words">
-                      {s.name}
+                      <Link to={`/students/${s.id}`} className="text-teal-800 hover:underline" aria-label={`الملف الشخصي: ${s.name}`}>
+                        {s.name}
+                      </Link>
                       {s.active === 0 && <span className="ms-2 rounded-full bg-gray-200 px-2 py-0.5 text-xs">معطّل</span>}
                     </p>
                     {s.notes && <p className="text-sm text-gray-600 break-words">ملاحظة: {s.notes}</p>}

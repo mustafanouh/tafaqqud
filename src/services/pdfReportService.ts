@@ -10,7 +10,7 @@ interface PdfDocument {
     getBlob(): Promise<Blob>
 }
 
-interface PdfMakeInstance {
+export interface PdfMakeInstance {
     addVirtualFileSystem(vfs: Record<string, string>): void
     addFonts(fonts: Record<string, Record<string, string>>): void
     createPdf(document: unknown): PdfDocument
@@ -27,7 +27,7 @@ async function toBase64(url: string): Promise<string> {
     return btoa(binary)
 }
 
-async function loadPdfMake(): Promise<PdfMakeInstance> {
+export async function loadPdfMake(): Promise<PdfMakeInstance> {
     if (!pdfMakePromise) {
         pdfMakePromise = (async () => {
             const module = (await import('pdfmake-rtl/build/pdfmake')) as { default?: PdfMakeInstance } | PdfMakeInstance
@@ -59,7 +59,7 @@ async function loadPdfMake(): Promise<PdfMakeInstance> {
  * In pdfmake-rtl, multi-digit numbers inside an Arabic text run get reversed by the bidirectional engine.
  * Pre-reversing numbers embedded in mixed text guarantees they render in their true natural order.
  */
-function fixRtlDigits(text: string): string {
+export function fixRtlDigits(text: string): string {
     if (!text) return ''
     return text.replace(/\d+(\.\d+)?/g, (match) => match.split('').reverse().join(''))
 }

@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import type { AttendanceDay, AttendanceRecord } from '../types/attendance'
+import type { Assessment, Grade } from '../types/assessment'
 import type { Student } from '../types/student'
 
 export interface SettingRow {
@@ -12,6 +13,8 @@ export class TafaqqudDB extends Dexie {
   attendanceDays!: Table<AttendanceDay, string>
   attendanceRecords!: Table<AttendanceRecord, string>
   settings!: Table<SettingRow, string>
+  assessments!: Table<Assessment, string>
+  grades!: Table<Grade, string>
 
   constructor(name = 'tafaqqud') {
     super(name)
@@ -39,6 +42,14 @@ export class TafaqqudDB extends Dexie {
           record.behaviorScore ??= null
         })
       })
+    this.version(3).stores({
+      students: 'id, active, normalizedName',
+      attendanceDays: 'id, &date, status',
+      attendanceRecords: 'id, dayId, studentId, &[dayId+studentId]',
+      settings: 'key',
+      assessments: 'id, type, date',
+      grades: 'id, assessmentId, studentId, &[assessmentId+studentId]',
+    })
   }
 }
 

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ClipboardCheck, History, Save, Users } from 'lucide-react'
+import { ClipboardCheck, GraduationCap, History, Users } from 'lucide-react'
 import AttendanceSummary from '../components/AttendanceSummary'
 import EmptyState from '../components/EmptyState'
 import { db } from '../db/database'
@@ -65,8 +65,8 @@ export default function DashboardPage() {
         <Link to="/history" className="btn-secondary">
           <History size={18} aria-hidden /> سجل الأيام السابقة
         </Link>
-        <Link to="/backup" className="btn-secondary">
-          <Save size={18} aria-hidden /> النسخ الاحتياطي
+        <Link to="/grades" className="btn-secondary">
+          <GraduationCap size={18} aria-hidden /> العلامات
         </Link>
       </div>
     </div>

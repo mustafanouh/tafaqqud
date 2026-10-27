@@ -5,12 +5,18 @@ import './styles/index.css'
 import App from './app/App'
 
 // التحديث التلقائي للنسخة الجديدة
-const updateSW = registerSW({
-  immediate: true,
-  onNeedRefresh() {
-    updateSW(true)
-  },
-})
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  try {
+    const updateSW = registerSW({
+      immediate: true,
+      onNeedRefresh() {
+        updateSW(true)
+      },
+    })
+  } catch (err) {
+    console.warn('Service worker registration error:', err)
+  }
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

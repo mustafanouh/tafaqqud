@@ -2,6 +2,7 @@ import { db } from '../db/database'
 import { getAllSettings, setSetting, SETTING_KEYS } from '../db/settingsRepository'
 import { BACKUP_FORMAT, BACKUP_VERSION, type BackupFile } from '../types/backup'
 import { STATUS_LABEL, type AttendanceDay, type AttendanceRecord, type HomeworkStatus, type RecordStatus } from '../types/attendance'
+import type { Assessment, AssessmentType, Grade } from '../types/assessment'
 import type { Student } from '../types/student'
 import { isValidDateString, nowIso } from '../utils/date'
 import { toCsv } from '../utils/csv'
@@ -11,13 +12,15 @@ const RECORD_STATUSES: RecordStatus[] = ['unmarked', 'present', 'absent', 'late'
 export class BackupError extends Error { }
 
 export async function createBackup(): Promise<BackupFile> {
-  const [settings, students, days, records] = await Promise.all([
+  const [settings, students, days, records, assessments, grades] = await Promise.all([
     getAllSettings(),
     db.students.toArray(),
     db.attendanceDays.toArray(),
     db.attendanceRecords.toArray(),
+    db.assessments.toArray(),
+    db.grades.toArray(),
   ])
-  return { format: BACKUP_FORMAT, version: BACKUP_VERSION, createdAt: nowIso(), settings, students, days, records }
+  return { format: BACKUP_FORMAT, version: BACKUP_VERSION, createdAt: nowIso(), settings, students, days, records, assessments, grades }
 }
 
 export async function markExported(): Promise<void> {
@@ -31,7 +34,7 @@ const isStr = (v: unknown): v is string => typeof v === 'string'
 export function validateBackup(raw: unknown): BackupFile {
   if (!isObj(raw)) throw new BackupError('الملف ليس نسخة احتياطية صالحة')
   if (raw.format !== BACKUP_FORMAT) throw new BackupError('هذا الملف ليس نسخة احتياطية من تطبيق تفقد')
-  if (raw.version !== 1 && raw.version !== BACKUP_VERSION) throw new BackupError(`إصدار النسخة غير مدعوم (${String(raw.version)})`)
+  if (raw.version !== 1 && raw.version !== 2 && raw.version !== BACKUP_VERSION) throw new BackupError(`إصدار النسخة غير مدعوم (${String(raw.version)})`)
   if (!isStr(raw.createdAt)) throw new BackupError('تاريخ إنشاء النسخة مفقود')
   if (!Array.isArray(raw.students) || !Array.isArray(raw.days) || !Array.isArray(raw.records)) {
     throw new BackupError('بنية الملف غير صحيحة')
@@ -123,7 +126,65 @@ export function validateBackup(raw: unknown): BackupFile {
     }
   })
 
-  return { format: BACKUP_FORMAT, version: BACKUP_VERSION, createdAt: raw.createdAt, settings, students, days, records }
+  const { assessments, grades } = validateGrades(raw, studentIds)
+
+  return { format: BACKUP_FORMAT, version: BACKUP_VERSION, createdAt: raw.createdAt, settings, students, days, records, assessments, grades }
+}
+
+/** الاختبارات والعلامات اختيارية (غير موجودة في الإصدارين 1 و2) */
+function validateGrades(raw: Record<string, unknown>, studentIds: Set<string>): { assessments: Assessment[]; grades: Grade[] } {
+  const rawAssessments = raw.assessments ?? []
+  const rawGrades = raw.grades ?? []
+  if (!Array.isArray(rawAssessments) || !Array.isArray(rawGrades)) throw new BackupError('بنية العلامات غير صحيحة')
+
+  const assessmentMax = new Map<string, number>()
+  const assessments: Assessment[] = rawAssessments.map((a, i) => {
+    if (!isObj(a) || !isStr(a.id) || !isStr(a.title) || !a.title.trim()) throw new BackupError(`بيانات الاختبار رقم ${i + 1} غير صالحة`)
+    if (a.type !== 'quiz' && a.type !== 'exam') throw new BackupError(`نوع الاختبار رقم ${i + 1} غير صالح`)
+    if (!isStr(a.date) || !isValidDateString(a.date)) throw new BackupError(`تاريخ الاختبار رقم ${i + 1} غير صالح`)
+    if (typeof a.maxScore !== 'number' || !Number.isFinite(a.maxScore) || a.maxScore <= 0) throw new BackupError(`العلامة العظمى للاختبار رقم ${i + 1} غير صالحة`)
+    if (assessmentMax.has(a.id)) throw new BackupError('يوجد اختبار مكرر في الملف')
+    assessmentMax.set(a.id, a.maxScore)
+    return {
+      id: a.id,
+      type: a.type as AssessmentType,
+      title: a.title,
+      subject: isStr(a.subject) ? a.subject : '',
+      date: a.date,
+      maxScore: a.maxScore,
+      note: isStr(a.note) ? a.note : '',
+      createdAt: isStr(a.createdAt) ? a.createdAt : nowIso(),
+      updatedAt: isStr(a.updatedAt) ? a.updatedAt : nowIso(),
+    }
+  })
+
+  const pairs = new Set<string>()
+  const gradeIds = new Set<string>()
+  const grades: Grade[] = rawGrades.map((g, i) => {
+    if (!isObj(g) || !isStr(g.id) || !isStr(g.assessmentId) || !isStr(g.studentId)) throw new BackupError(`علامة الطالب رقم ${i + 1} غير صالحة`)
+    const max = assessmentMax.get(g.assessmentId)
+    if (max === undefined) throw new BackupError(`العلامة رقم ${i + 1} تشير إلى اختبار غير موجود`)
+    if (!studentIds.has(g.studentId)) throw new BackupError(`العلامة رقم ${i + 1} تشير إلى طالب غير موجود`)
+    const pair = `${g.assessmentId}|${g.studentId}`
+    if (pairs.has(pair) || gradeIds.has(g.id)) throw new BackupError('توجد علامة مكررة في الملف')
+    pairs.add(pair)
+    gradeIds.add(g.id)
+    const score = g.score === undefined ? null : g.score
+    if (score !== null && (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > max)) {
+      throw new BackupError(`قيمة العلامة رقم ${i + 1} غير صالحة`)
+    }
+    return {
+      id: g.id,
+      assessmentId: g.assessmentId,
+      studentId: g.studentId,
+      score,
+      absent: g.absent === true,
+      note: isStr(g.note) ? g.note : '',
+      createdAt: isStr(g.createdAt) ? g.createdAt : nowIso(),
+      updatedAt: isStr(g.updatedAt) ? g.updatedAt : nowIso(),
+    }
+  })
+  return { assessments, grades }
 }
 
 export function parseBackupText(text: string): BackupFile {
@@ -138,11 +199,13 @@ export function parseBackupText(text: string): BackupFile {
 
 /** استبدال كامل للبيانات المحلية داخل معاملة واحدة (تفشل كلها أو تنجح كلها) */
 export async function restoreBackup(backup: BackupFile): Promise<void> {
-  await db.transaction('rw', db.students, db.attendanceDays, db.attendanceRecords, db.settings, async () => {
-    await Promise.all([db.students.clear(), db.attendanceDays.clear(), db.attendanceRecords.clear(), db.settings.clear()])
+  await db.transaction('rw', [db.students, db.attendanceDays, db.attendanceRecords, db.settings, db.assessments, db.grades], async () => {
+    await Promise.all([db.students.clear(), db.attendanceDays.clear(), db.attendanceRecords.clear(), db.settings.clear(), db.assessments.clear(), db.grades.clear()])
     await db.students.bulkAdd(backup.students)
     await db.attendanceDays.bulkAdd(backup.days)
     await db.attendanceRecords.bulkAdd(backup.records)
+    await db.assessments.bulkAdd(backup.assessments)
+    await db.grades.bulkAdd(backup.grades)
     await db.settings.bulkAdd(Object.entries(backup.settings).map(([key, value]) => ({ key, value })))
   })
 }

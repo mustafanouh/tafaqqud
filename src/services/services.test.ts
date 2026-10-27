@@ -12,7 +12,7 @@ import { parseNamesBlock } from '../utils/normalizeName'
 import { parseEvaluationNumber } from '../utils/evaluation'
 
 beforeEach(async () => {
-  await Promise.all([db.students.clear(), db.attendanceDays.clear(), db.attendanceRecords.clear(), db.settings.clear()])
+  await Promise.all([db.students.clear(), db.attendanceDays.clear(), db.attendanceRecords.clear(), db.settings.clear(), db.assessments.clear(), db.grades.clear()])
 })
 
 async function seed(names: string[]) {
@@ -181,9 +181,9 @@ describe('النسخ الاحتياطي', () => {
 
   it('يستورد النسخة الأولى ويطبع الحقول الجديدة بقيم افتراضية', () => {
     const legacy = { format: 'tafaqqud-backup', version: 1, createdAt: '2026-10-23T00:00:00.000Z', settings: {}, students: [], days: [], records: [] }
-    expect(parseBackupText(JSON.stringify(legacy))).toMatchObject({ version: 2, days: [], records: [] })
+    expect(parseBackupText(JSON.stringify(legacy))).toMatchObject({ version: 3, days: [], records: [], assessments: [], grades: [] })
     const current = { ...legacy, version: 2 }
-    expect(parseBackupText(JSON.stringify(current)).version).toBe(2)
+    expect(parseBackupText(JSON.stringify(current)).version).toBe(3)
   })
 
   it('يرفض قيماً جديدة غير صالحة في النسخة الاحتياطية', () => {
