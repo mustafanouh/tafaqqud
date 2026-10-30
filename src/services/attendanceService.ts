@@ -1,14 +1,19 @@
 import { db, newId } from '../db/database'
 import { attendanceRepository } from '../db/attendanceRepository'
 import type { AttendanceDay, AttendanceRecord, HomeworkStatus, RecordStatus } from '../types/attendance'
-import { nowIso, todayLocal } from '../utils/date'
+import { getWeekendDayName, isWeekend, nowIso, todayLocal } from '../utils/date'
 
 export const attendanceService = {
   /**
    * يعيد يوم التاريخ المطلوب إن وُجد، وإلا ينشئه مع سجل «غير محدد» لكل طالب نشط.
+   * يتحقق من العطلة الأسبوعية (الجمعة والسبت) ويرمي خطأ بالعربية.
    * العملية داخل معاملة واحدة، والفهرس الفريد على date يمنع تكرار اليوم.
    */
-  async startOrGetDay(date: string = todayLocal()): Promise<AttendanceDay> {
+  async startOrGetDay(date: string = todayLocal(), options?: { allowWeekend?: boolean }): Promise<AttendanceDay> {
+    if (!options?.allowWeekend && isWeekend(date)) {
+      const weekendName = getWeekendDayName(date) ?? 'عطلة نهاية الأسبوع'
+      throw new Error(`لا يمكن بدء تفقد في يوم عطلة (${weekendName})`)
+    }
     return db.transaction('rw', db.students, db.attendanceDays, db.attendanceRecords, async () => {
       const existing = await attendanceRepository.dayByDate(date)
       if (existing) return existing
@@ -110,26 +115,27 @@ export const attendanceService = {
     studentId: string,
     evaluation: { dictationScore?: number | null; homework?: HomeworkStatus | null; behaviorScore?: number | null },
   ): Promise<void> {
-    if (evaluation.dictationScore !== undefined && evaluation.dictationScore !== null) {
-      if (!Number.isFinite(evaluation.dictationScore) || evaluation.dictationScore < 0 || evaluation.dictationScore > 10) {
+    const normalized = { ...evaluation }
+    if (normalized.dictationScore !== undefined && normalized.dictationScore !== null) {
+      if (!Number.isFinite(normalized.dictationScore) || normalized.dictationScore < 0 || normalized.dictationScore > 10) {
         throw new Error('علامة الإملاء يجب أن تكون بين 0 و10')
       }
-      evaluation.dictationScore = Math.round(evaluation.dictationScore * 2) / 2
+      normalized.dictationScore = Math.round(normalized.dictationScore * 2) / 2
     }
-    if (evaluation.behaviorScore !== undefined && evaluation.behaviorScore !== null) {
-      if (!Number.isFinite(evaluation.behaviorScore) || evaluation.behaviorScore < 0 || evaluation.behaviorScore > 10) {
+    if (normalized.behaviorScore !== undefined && normalized.behaviorScore !== null) {
+      if (!Number.isFinite(normalized.behaviorScore) || normalized.behaviorScore < 0 || normalized.behaviorScore > 10) {
         throw new Error('السلوك يجب أن يكون بين 0 و10')
       }
-      evaluation.behaviorScore = Math.round(evaluation.behaviorScore)
+      normalized.behaviorScore = Math.round(normalized.behaviorScore)
     }
-    if (evaluation.homework !== undefined && evaluation.homework !== null && !['done', 'partial', 'none'].includes(evaluation.homework)) {
+    if (normalized.homework !== undefined && normalized.homework !== null && !['done', 'partial', 'none'].includes(normalized.homework)) {
       throw new Error('حالة الوظيفة غير صالحة')
     }
     await db.transaction('rw', db.attendanceDays, db.attendanceRecords, async () => {
       const record = await attendanceRepository.record(dayId, studentId)
       if (!record) throw new Error('سجل الطالب غير موجود في هذا اليوم')
       const now = nowIso()
-      await db.attendanceRecords.update(record.id, { ...evaluation, updatedAt: now })
+      await db.attendanceRecords.update(record.id, { ...normalized, updatedAt: now })
       await db.attendanceDays.update(dayId, { updatedAt: now })
     })
   },

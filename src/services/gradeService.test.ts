@@ -7,7 +7,6 @@ import { gradeService, summarizePercents, toPercent } from './gradeService'
 import { loadStudentProfile } from './studentProfileService'
 import { studentService } from './studentService'
 import { buildStudentReportDocument } from './studentPdfService'
-import { buildAssessmentReportDocument } from './assessmentPdfService'
 
 beforeEach(async () => {
   await Promise.all([db.students.clear(), db.attendanceDays.clear(), db.attendanceRecords.clear(), db.settings.clear(), db.assessments.clear(), db.grades.clear()])
@@ -123,21 +122,19 @@ describe('تقرير الطالب', () => {
     expect(json).not.toContain('001%')
     expect(json).toContain('مدرسة النور')
   })
-})
 
-describe('كشف علامات الاختبار', () => {
-  it('يضم كل الطلاب مع الغائب وغير المُدخل والإحصاءات', async () => {
-    const [a, b, c] = await seed(['أحمد', 'سارة', 'عمر'])
-    const t = await gradeService.createAssessment(quiz)
-    await gradeService.setGrade(t.id, a.id, { score: 9 })
-    await gradeService.setGrade(t.id, b.id, { absent: true })
-    const grades = await db.grades.toArray()
-    const rows = [a, b, c].map((student) => ({ student, grade: grades.find((g) => g.studentId === student.id) }))
-    const json = JSON.stringify(buildAssessmentReportDocument((await db.assessments.get(t.id))!, rows, {}, '2026-10-27'))
-    for (const n of ['أحمد', 'سارة', 'عمر']) expect(json).toContain(n)
-    expect(json).toContain('9 / 10')
-    expect(json).toContain('غائب')
-    expect(json).toContain('1 / 1')
+  it('يُظهر جدول علامات الإملاء مع التاريخ في تقرير الطالب', async () => {
+    const [a] = await seed(['سامي'])
+    const day = await attendanceService.startOrGetDay('2026-10-25')
+    await attendanceService.setDayOptions(day.id, { hasDictation: true })
+    await attendanceService.setStatus(day.id, a.id, 'present')
+    await attendanceService.setEvaluation(day.id, a.id, { dictationScore: 8.5 })
+    const profile = (await loadStudentProfile(a.id))!
+    const doc = buildStudentReportDocument(profile, {}, {}, '2026-10-27')
+    const json = JSON.stringify(doc)
+    expect(json).toContain('سجل علامات الإملاء')
+    expect(json).toContain('2026-10-25')
+    expect(json).toContain('8.5 / 10')
   })
 })
 

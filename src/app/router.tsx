@@ -1,31 +1,41 @@
+import { lazy, Suspense } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import Layout from '../components/Layout'
-import DashboardPage from '../pages/DashboardPage'
-import StudentsPage from '../pages/StudentsPage'
-import DailyAttendancePage from '../pages/DailyAttendancePage'
-import HistoryPage from '../pages/HistoryPage'
-import AttendanceDetailsPage from '../pages/AttendanceDetailsPage'
-import GradesPage from '../pages/GradesPage'
-import AssessmentPage from '../pages/AssessmentPage'
-import StudentProfilePage from '../pages/StudentProfilePage'
-import SettingsPage from '../pages/SettingsPage'
+
+// التحميل الكسول للصفحات الكبيرة لتقليل حجم الحزمة الابتدائية وتسريع الإقلاع
+const DashboardPage = lazy(() => import('../pages/DashboardPage'))
+const StudentsPage = lazy(() => import('../pages/StudentsPage'))
+const DailyAttendancePage = lazy(() => import('../pages/DailyAttendancePage'))
+const HistoryPage = lazy(() => import('../pages/HistoryPage'))
+const AttendanceDetailsPage = lazy(() => import('../pages/AttendanceDetailsPage'))
+const GradesPage = lazy(() => import('../pages/GradesPage'))
+const AssessmentPage = lazy(() => import('../pages/AssessmentPage'))
+const StudentProfilePage = lazy(() => import('../pages/StudentProfilePage'))
+const SettingsPage = lazy(() => import('../pages/SettingsPage'))
+const NotFoundPage = lazy(() => import('../pages/NotFoundPage'))
+
+const SuspenseWrapper = ({ children }: { children: React.ReactNode }) => (
+  <Suspense fallback={<div className="p-8 text-center text-gray-500">جارٍ التحميل…</div>}>
+    {children}
+  </Suspense>
+)
 
 export const router = createBrowserRouter([
   {
     element: <Layout />,
     children: [
-      { path: '/', element: <DashboardPage /> },
-      { path: '/students', element: <StudentsPage /> },
-      { path: '/attendance', element: <DailyAttendancePage /> },
-      { path: '/history', element: <HistoryPage /> },
-      { path: '/history/:dayId', element: <AttendanceDetailsPage /> },
-      { path: '/students/:studentId', element: <StudentProfilePage /> },
-      { path: '/grades', element: <GradesPage /> },
-      { path: '/grades/:assessmentId', element: <AssessmentPage /> },
+      { path: '/', element: <SuspenseWrapper><DashboardPage /></SuspenseWrapper> },
+      { path: '/students', element: <SuspenseWrapper><StudentsPage /></SuspenseWrapper> },
+      { path: '/attendance', element: <SuspenseWrapper><DailyAttendancePage /></SuspenseWrapper> },
+      { path: '/history', element: <SuspenseWrapper><HistoryPage /></SuspenseWrapper> },
+      { path: '/history/:dayId', element: <SuspenseWrapper><AttendanceDetailsPage /></SuspenseWrapper> },
+      { path: '/students/:studentId', element: <SuspenseWrapper><StudentProfilePage /></SuspenseWrapper> },
+      { path: '/grades', element: <SuspenseWrapper><GradesPage /></SuspenseWrapper> },
+      { path: '/grades/:assessmentId', element: <SuspenseWrapper><AssessmentPage /></SuspenseWrapper> },
       // المسار القديم: النسخ الاحتياطي أصبح ضمن الإعدادات
       { path: '/backup', element: <Navigate to="/settings#backup" replace /> },
-      { path: '/settings', element: <SettingsPage /> },
-      { path: '*', element: <DashboardPage /> },
+      { path: '/settings', element: <SuspenseWrapper><SettingsPage /></SuspenseWrapper> },
+      { path: '*', element: <SuspenseWrapper><NotFoundPage /></SuspenseWrapper> },
     ],
   },
 ])

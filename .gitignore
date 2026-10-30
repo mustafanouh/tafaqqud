@@ -1,3 +1,6 @@
 node_modules
 dist
 *.local
+public/assets/aistudio
+.aistudio
+*.tsbuildinfo

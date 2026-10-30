@@ -14,7 +14,6 @@
     "dexie": "^4.4.6",
     "dexie-react-hooks": "^4.4.0",
     "lucide-react": "^1.61.0",
-    "pdfmake": "^0.3.12",
     "pdfmake-rtl": "^2.1.2",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

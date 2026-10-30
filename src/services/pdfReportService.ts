@@ -18,13 +18,16 @@ export interface PdfMakeInstance {
 
 let pdfMakePromise: Promise<PdfMakeInstance> | undefined
 
-async function toBase64(url: string): Promise<string> {
+export async function toBase64(url: string): Promise<string> {
     const response = await fetch(url)
     if (!response.ok) throw new Error('تعذر تحميل خط التقرير')
     const bytes = new Uint8Array(await response.arrayBuffer())
-    let binary = ''
-    for (const byte of bytes) binary += String.fromCharCode(byte)
-    return btoa(binary)
+    const CHUNK_SIZE = 0x8000
+    const chunks: string[] = []
+    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+        chunks.push(String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK_SIZE))))
+    }
+    return btoa(chunks.join(''))
 }
 
 export async function loadPdfMake(): Promise<PdfMakeInstance> {
@@ -145,9 +148,9 @@ export async function downloadAttendancePdf(dayId: string): Promise<void> {
 
         return [
             { text: String(row.number), alignment: 'center' as const, fillColor: rowBg, color: '#6b7280' },
-            { text: fixRtlDigits(row.studentName), bold: true, alignment: 'right' as const, fillColor: rowBg },
+            { text: row.studentName, bold: true, alignment: 'right' as const, fillColor: rowBg },
             { ...getStatusStyle(row.status), fillColor: rowBg },
-            { text: row.note ? fixRtlDigits(row.note) : '—', color: row.note ? '#1f2937' : '#9ca3af', alignment: 'right' as const, fillColor: rowBg },
+            { text: row.note ? row.note : '—', color: row.note ? '#1f2937' : '#9ca3af', alignment: 'right' as const, fillColor: rowBg },
             {
                 text: row.behaviorScore !== null ? String(row.behaviorScore) : '—',
                 alignment: 'center' as const,
@@ -237,6 +240,55 @@ export async function downloadAttendancePdf(dayId: string): Promise<void> {
         })
     }
 
+    const renderedHeader = [...tableHeader].reverse()
+    const renderedWidths = [...tableWidths].reverse()
+    const renderedRows = tableRows.map((cells) => [...cells].reverse())
+
+    const attendanceCards = [
+        {
+            stack: [
+                { text: 'إجمالي الطلاب', style: 'statLabel' },
+                { text: String(report.stats.total), style: 'statValue', color: '#111827' },
+            ],
+            fillColor: '#f3f4f6',
+            margin: [2, 3, 2, 3],
+        },
+        {
+            stack: [
+                { text: 'الحاضرون', style: 'statLabel' },
+                { text: String(report.stats.present), style: 'statValue', color: '#047857' },
+            ],
+            fillColor: '#ecfdf5',
+            margin: [2, 3, 2, 3],
+        },
+        {
+            stack: [
+                { text: 'الغائبون', style: 'statLabel' },
+                { text: String(report.stats.absent), style: 'statValue', color: '#b91c1c' },
+            ],
+            fillColor: '#fef2f2',
+            margin: [2, 3, 2, 3],
+        },
+        {
+            stack: [
+                { text: 'المتأخرون', style: 'statLabel' },
+                { text: String(report.stats.late), style: 'statValue', color: '#b45309' },
+            ],
+            fillColor: '#fffbeb',
+            margin: [2, 3, 2, 3],
+        },
+        {
+            stack: [
+                { text: 'نسبة الحضور', style: 'statLabel' },
+                { text: `${attendanceRate}%`, style: 'statValue', color: '#0f766e' },
+            ],
+            fillColor: '#f0fdfa',
+            margin: [2, 3, 2, 3],
+        },
+    ]
+    const renderedStatCards = [...attendanceCards].reverse()
+    const renderedEvalCards = [...evalCards].reverse()
+
     const document = {
         pageSize: 'A4',
         pageOrientation: 'portrait',
@@ -293,10 +345,10 @@ export async function downloadAttendancePdf(dayId: string): Promise<void> {
                             {
                                 stack: [
                                     { text: 'تفقد — تقرير حضور وتقييم الطلاب', style: 'title', alignment: 'center' },
-                                    { text: fixRtlDigits(`تاريخ التقرير: ${report.date}`), style: 'dateBadge', alignment: 'center' },
+                                    { text: `تاريخ التقرير: ${report.date}`, style: 'dateBadge', alignment: 'center' },
                                     ...(headerDetails.length > 0 ? [
                                         {
-                                            text: fixRtlDigits(headerDetails.join('   •   ')),
+                                            text: headerDetails.join('   •   '),
                                             style: 'metaText',
                                             alignment: 'center',
                                         },
@@ -317,53 +369,12 @@ export async function downloadAttendancePdf(dayId: string): Promise<void> {
                 margin: [0, 0, 0, 8],
             },
 
-            // Attendance Statistics Cards Table
+            // Attendance Statistics Cards Table (ordered from right to left)
             {
                 table: {
                     widths: ['*', '*', '*', '*', '*'],
                     body: [
-                        [
-                            {
-                                stack: [
-                                    { text: 'إجمالي الطلاب', style: 'statLabel' },
-                                    { text: String(report.stats.total), style: 'statValue', color: '#111827' },
-                                ],
-                                fillColor: '#f3f4f6',
-                                margin: [2, 3, 2, 3],
-                            },
-                            {
-                                stack: [
-                                    { text: 'الحاضرون', style: 'statLabel' },
-                                    { text: String(report.stats.present), style: 'statValue', color: '#047857' },
-                                ],
-                                fillColor: '#ecfdf5',
-                                margin: [2, 3, 2, 3],
-                            },
-                            {
-                                stack: [
-                                    { text: 'الغائبون', style: 'statLabel' },
-                                    { text: String(report.stats.absent), style: 'statValue', color: '#b91c1c' },
-                                ],
-                                fillColor: '#fef2f2',
-                                margin: [2, 3, 2, 3],
-                            },
-                            {
-                                stack: [
-                                    { text: 'المتأخرون', style: 'statLabel' },
-                                    { text: String(report.stats.late), style: 'statValue', color: '#b45309' },
-                                ],
-                                fillColor: '#fffbeb',
-                                margin: [2, 3, 2, 3],
-                            },
-                            {
-                                stack: [
-                                    { text: 'نسبة الحضور', style: 'statLabel' },
-                                    { text: `${attendanceRate}%`, style: 'statValue', color: '#0f766e' },
-                                ],
-                                fillColor: '#f0fdfa',
-                                margin: [2, 3, 2, 3],
-                            },
-                        ],
+                        renderedStatCards,
                     ],
                 },
                 layout: {
@@ -375,13 +386,13 @@ export async function downloadAttendancePdf(dayId: string): Promise<void> {
                 margin: [0, 0, 0, 8],
             },
 
-            // Evaluation Cards Table (replaces the scrambled text box!)
-            ...(evalCards.length > 0 ? [
+            // Evaluation Cards Table (ordered from right to left)
+            ...(renderedEvalCards.length > 0 ? [
                 {
                     table: {
-                        widths: evalCards.map(() => '*'),
+                        widths: renderedEvalCards.map(() => '*'),
                         body: [
-                            evalCards,
+                            renderedEvalCards,
                         ],
                     },
                     layout: {
@@ -394,15 +405,15 @@ export async function downloadAttendancePdf(dayId: string): Promise<void> {
                 },
             ] : []),
 
-            // Main Student Attendance Table
+            // Main Student Attendance Table (ordered from right to left)
             {
                 table: {
                     headerRows: 1,
                     dontBreakRows: true,
-                    widths: tableWidths,
+                    widths: renderedWidths,
                     body: [
-                        tableHeader,
-                        ...tableRows,
+                        renderedHeader,
+                        ...renderedRows,
                     ],
                 },
                 layout: {
@@ -417,34 +428,58 @@ export async function downloadAttendancePdf(dayId: string): Promise<void> {
                 },
             },
 
-            // Signatures block at bottom
+            // Signatures block at bottom (teacher on right, administration on left)
             {
-                columns: [
-                    {
-                        width: '*',
-                        stack: [
-                            { text: 'توقيع المعلم / المربي:', bold: true, fontSize: 9, margin: [0, 16, 0, 20] },
-                            { text: '................................................', color: '#9ca3af' },
+                table: {
+                    widths: ['*', '*'],
+                    body: [
+                        [
+                            {
+                                stack: [
+                                    { text: 'اعتماد إدارة المدرسة / الختم:', bold: true, fontSize: 9, margin: [0, 16, 0, 20] },
+                                    { text: '................................................', color: '#9ca3af' },
+                                ],
+                                alignment: 'left' as const,
+                                border: [false, false, false, false],
+                            },
+                            {
+                                stack: [
+                                    { text: 'توقيع المعلم / المربي:', bold: true, fontSize: 9, margin: [0, 16, 0, 20] },
+                                    { text: '................................................', color: '#9ca3af' },
+                                ],
+                                alignment: 'right' as const,
+                                border: [false, false, false, false],
+                            },
                         ],
-                        alignment: 'right',
-                    },
-                    {
-                        width: '*',
-                        stack: [
-                            { text: 'اعتماد إدارة المدرسة / الختم:', bold: true, fontSize: 9, margin: [0, 16, 0, 20] },
-                            { text: '................................................', color: '#9ca3af' },
-                        ],
-                        alignment: 'left',
-                    },
-                ],
+                    ],
+                },
+                layout: 'noBorders',
                 margin: [0, 12, 0, 0],
             },
         ],
         footer: (currentPage: number, pageCount: number) => ({
-            columns: [
-                { text: fixRtlDigits(`تطبيق تفقد — تاريخ الإصدار: ${report.date}`), alignment: 'right', fontSize: 7.5, color: '#9ca3af' },
-                { text: `صفحة ${currentPage} من ${pageCount}`, alignment: 'left', fontSize: 7.5, color: '#9ca3af' },
-            ],
+            table: {
+                widths: ['*', '*'],
+                body: [
+                    [
+                        {
+                            text: `صفحة ${currentPage} من ${pageCount}`,
+                            alignment: 'left' as const,
+                            fontSize: 7.5,
+                            color: '#9ca3af',
+                            border: [false, false, false, false],
+                        },
+                        {
+                            text: `تطبيق تفقد — تاريخ الإصدار: ${report.date}`,
+                            alignment: 'right' as const,
+                            fontSize: 7.5,
+                            color: '#9ca3af',
+                            border: [false, false, false, false],
+                        },
+                    ],
+                ],
+            },
+            layout: 'noBorders',
             margin: [32, 10, 32, 0],
         }),
     }

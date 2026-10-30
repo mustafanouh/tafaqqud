@@ -5,6 +5,21 @@ import { todayLocal } from '../utils/date'
 import { formatScore } from '../utils/evaluation'
 import { loadPdfMake } from './pdfReportService'
 import { loadStudentProfile, type DateRange, type StudentProfile } from './studentProfileService'
+import { loadClassRanking, type ClassRankingResult } from './rankingService'
+
+export interface StudentRankingInfo {
+  rank: number | null
+  totalRanked: number
+  sufficientData: boolean
+  classSummary?: {
+    averageScore: number | null
+    averageAttendanceRate: number | null
+    averageGradesPercent: number | null
+    averageBehavior: number | null
+    averageDictation: number | null
+    averageHomeworkRate: number | null
+  }
+}
 
 const BORDER = { hLineWidth: () => 0.5, vLineWidth: () => 0.5, hLineColor: () => '#cbd5e1', vLineColor: () => '#cbd5e1' }
 
@@ -24,7 +39,8 @@ function statCard(label: string, value: string, color = '#111827', fill = '#f3f4
 }
 
 function statRow(cards: ReturnType<typeof statCard>[]) {
-  return { table: { widths: cards.map(() => '*'), body: [cards] }, layout: BORDER, margin: [0, 0, 0, 8] }
+  const rtlCards = [...cards].reverse()
+  return { table: { widths: rtlCards.map(() => '*'), body: [rtlCards] }, layout: BORDER, margin: [0, 0, 0, 8] }
 }
 
 function sectionTitle(text: string) {
@@ -43,7 +59,13 @@ const tableLayout = {
 }
 
 /** يبني تعريف مستند pdfmake لتقرير الطالب (منفصل عن التنزيل لسهولة الاختبار) */
-export function buildStudentReportDocument(profile: StudentProfile, settings: Record<string, string>, range: DateRange, today: string = todayLocal()) {
+export function buildStudentReportDocument(
+  profile: StudentProfile,
+  settings: Record<string, string>,
+  range: DateRange,
+  today: string = todayLocal(),
+  rankingInfo?: StudentRankingInfo | null,
+) {
   const { student, attendanceStats: st, evaluation: ev } = profile
   const header = [
     settings.schoolName?.trim() && `المدرسة: ${settings.schoolName.trim()}`,
@@ -52,30 +74,90 @@ export function buildStudentReportDocument(profile: StudentProfile, settings: Re
   ].filter(Boolean) as string[]
   const periodText = range.from || range.to ? `الفترة: ${range.from ?? 'البداية'} — ${range.to ?? 'اليوم'}` : 'الفترة: كل السجلات'
 
+  // أعمدة العلامات بالترتيب العربي (من اليمين إلى اليسار: #، الاختبار، النوع، المادة، التاريخ، العلامة، النسبة)
+  // ونعكسها عند تمريرها لـ pdfmake لأن الفهرس 0 يظهر على أقصى اليسار
   const gradeRows = profile.grades.map(({ assessment, grade, percent }, i) => {
     const fill = i % 2 ? '#f9fafb' : '#ffffff'
     const scoreText = grade?.absent ? 'غائب' : grade && grade.score !== null ? `${formatScore(grade.score)} / ${formatScore(assessment.maxScore)}` : 'لم تُدخل'
     return [
-      { text: String(i + 1), alignment: 'center' as const, fillColor: fill, color: '#6b7280' },
-      { text: assessment.title, bold: true, alignment: 'right' as const, fillColor: fill },
-      { text: ASSESSMENT_TYPE_LABEL[assessment.type], alignment: 'center' as const, fillColor: fill },
-      { text: assessment.subject ? assessment.subject : '—', alignment: 'center' as const, fillColor: fill },
-      { text: assessment.date, alignment: 'center' as const, fillColor: fill },
-      { text: scoreText, alignment: 'center' as const, fillColor: fill, bold: true, color: percentColor(percent) },
       { text: pct(percent), alignment: 'center' as const, fillColor: fill, color: percentColor(percent) },
+      { text: scoreText, alignment: 'center' as const, fillColor: fill, bold: true, color: percentColor(percent) },
+      { text: assessment.date, alignment: 'center' as const, fillColor: fill },
+      { text: assessment.subject ? assessment.subject : '—', alignment: 'center' as const, fillColor: fill },
+      { text: ASSESSMENT_TYPE_LABEL[assessment.type], alignment: 'center' as const, fillColor: fill },
+      { text: assessment.title, bold: true, alignment: 'right' as const, fillColor: fill },
+      { text: String(i + 1), alignment: 'center' as const, fillColor: fill, color: '#6b7280' },
     ]
   })
 
-  // أيام الغياب والتأخر فقط (الأهم للمراجعة)، مع الملاحظات
+  // أيام الغياب والتأخر فقط (الأهم للمراجعة)، مع الملاحظات (معكوسة لـ pdfmake)
   const issues = profile.attendance.filter((e) => e.record.status === 'absent' || e.record.status === 'late')
   const issueRows = issues.map(({ day, record }, i) => {
     const fill = i % 2 ? '#f9fafb' : '#ffffff'
     return [
-      { text: day.date, alignment: 'center' as const, fillColor: fill },
-      { text: STATUS_LABEL[record.status], alignment: 'center' as const, bold: true, color: record.status === 'absent' ? '#b91c1c' : '#b45309', fillColor: fill },
       { text: record.note ? record.note : '—', alignment: 'right' as const, fillColor: fill, color: record.note ? '#1f2937' : '#9ca3af' },
+      { text: STATUS_LABEL[record.status], alignment: 'center' as const, bold: true, color: record.status === 'absent' ? '#b91c1c' : '#b45309', fillColor: fill },
+      { text: day.date, alignment: 'center' as const, fillColor: fill },
     ]
   })
+
+  // سجل الإملاء (معكوس لـ pdfmake)
+  const dictations = profile.attendance.filter(
+    (e) => e.day.hasDictation && (e.record.dictationScore !== null || e.record.status === 'absent'),
+  )
+  const dictationRows = dictations.map(({ day, record }, i) => {
+    const fill = i % 2 ? '#f9fafb' : '#ffffff'
+    const scoreText =
+      record.status === 'absent'
+        ? 'غائب'
+        : record.dictationScore !== null
+          ? `${formatScore(record.dictationScore)} / 10`
+          : 'لم تُدخل'
+    const scoreColor =
+      record.status === 'absent'
+        ? '#b91c1c'
+        : record.dictationScore !== null && record.dictationScore < 5
+          ? '#b91c1c'
+          : '#0f766e'
+
+    return [
+      { text: record.note ? record.note : '—', alignment: 'right' as const, fillColor: fill, color: record.note ? '#1f2937' : '#9ca3af' },
+      { text: scoreText, alignment: 'center' as const, bold: true, fillColor: fill, color: scoreColor },
+      { text: STATUS_LABEL[record.status], alignment: 'center' as const, fillColor: fill },
+      { text: day.date, alignment: 'center' as const, fillColor: fill },
+      { text: String(i + 1), alignment: 'center' as const, fillColor: fill, color: '#6b7280' },
+    ]
+  })
+
+  // بطاقات الترتيب إن وجدت
+  let rankCardContent: ReturnType<typeof statCard>[] | null = null
+  if (rankingInfo) {
+    if (rankingInfo.rank !== null) {
+      rankCardContent = [
+        statCard('ترتيبه في الشعبة', `${rankingInfo.rank} من ${rankingInfo.totalRanked}`, '#0f766e', '#f0fdfa'),
+        statCard(
+          'متوسط الشعبة للحضور',
+          rankingInfo.classSummary?.averageAttendanceRate !== null && rankingInfo.classSummary?.averageAttendanceRate !== undefined
+            ? `${rankingInfo.classSummary.averageAttendanceRate}%`
+            : '—',
+          '#047857',
+          '#ecfdf5',
+        ),
+        statCard(
+          'متوسط الشعبة للعلامات',
+          rankingInfo.classSummary?.averageGradesPercent !== null && rankingInfo.classSummary?.averageGradesPercent !== undefined
+            ? `${rankingInfo.classSummary.averageGradesPercent}%`
+            : '—',
+          '#0f766e',
+          '#f0fdfa',
+        ),
+      ]
+    } else {
+      rankCardContent = [
+        statCard('ترتيبه في الشعبة', 'لا توجد بيانات', '#6b7280', '#f9fafb'),
+      ]
+    }
+  }
 
   return {
     pageSize: 'A4',
@@ -102,6 +184,8 @@ export function buildStudentReportDocument(profile: StudentProfile, settings: Re
       },
       ...(student.notes ? [{ text: `ملاحظة على الطالب: ${student.notes}`, fontSize: 8.5, color: '#4b5563', margin: [0, 0, 0, 6] }] : []),
 
+      ...(rankCardContent ? [statRow(rankCardContent)] : []),
+
       statRow([
         statCard('نسبة الحضور', pct(profile.attendanceRate), percentColor(profile.attendanceRate), '#f0fdfa'),
         statCard('متوسط العلامات', pct(profile.overallSummary.averagePercent), percentColor(profile.overallSummary.averagePercent), '#f0fdfa'),
@@ -118,7 +202,7 @@ export function buildStudentReportDocument(profile: StudentProfile, settings: Re
       ]),
       ...(issueRows.length
         ? [{
-            table: { headerRows: 1, dontBreakRows: true, widths: [70, 50, '*'], body: [[th('التاريخ'), th('الحالة'), th('الملاحظة', 'right')], ...issueRows] },
+            table: { headerRows: 1, dontBreakRows: true, widths: ['*', 50, 70], body: [[th('الملاحظة', 'right'), th('الحالة'), th('التاريخ')], ...issueRows] },
             layout: tableLayout,
             margin: [0, 0, 0, 6],
           }]
@@ -129,8 +213,23 @@ export function buildStudentReportDocument(profile: StudentProfile, settings: Re
         statCard('وظيفة: كتب', String(ev.homeworkDone), '#047857', '#ecfdf5'),
         statCard('وظيفة: جزئياً', String(ev.homeworkPartial), '#b45309', '#fffbeb'),
         statCard('وظيفة: لم يكتب', String(ev.homeworkNone), ev.homeworkNone ? '#b91c1c' : '#6b7280', ev.homeworkNone ? '#fef2f2' : '#f9fafb'),
-        statCard('عدد علامات الإملاء', String(ev.dictationCount)),
+        statCard('متوسط الإملاء', avg1(ev.averageDictation), '#0f766e', '#f0fdfa'),
       ]),
+      ...(dictationRows.length
+        ? [
+            { text: 'سجل علامات الإملاء', fontSize: 10, bold: true, color: '#0f766e', margin: [0, 4, 0, 3] },
+            {
+              table: {
+                headerRows: 1,
+                dontBreakRows: true,
+                widths: ['*', 65, 50, 70, 22],
+                body: [[th('الملاحظة', 'right'), th('علامة الإملاء'), th('الحالة'), th('التاريخ'), th('#')], ...dictationRows],
+              },
+              layout: tableLayout,
+              margin: [0, 0, 0, 6],
+            },
+          ]
+        : []),
 
       sectionTitle('العلامات'),
       ...(gradeRows.length
@@ -145,38 +244,108 @@ export function buildStudentReportDocument(profile: StudentProfile, settings: Re
               table: {
                 headerRows: 1,
                 dontBreakRows: true,
-                widths: [22, '*', 44, 50, 58, 62, 36],
-                body: [[th('#'), th('الاختبار', 'right'), th('النوع'), th('المادة'), th('التاريخ'), th('العلامة'), th('النسبة')], ...gradeRows],
+                widths: [36, 62, 58, 50, 44, '*', 22],
+                body: [[th('النسبة'), th('العلامة'), th('التاريخ'), th('المادة'), th('النوع'), th('الاختبار', 'right'), th('#')], ...gradeRows],
               },
               layout: tableLayout,
             },
           ]
         : [{ text: 'لا توجد علامات مسجلة في هذه الفترة.', color: '#6b7280' }]),
 
+      // خانتا التوقيع والاعتماد (المعلم على اليمين والإدارة على اليسار)
       {
-        columns: [
-          { width: '*', stack: [{ text: 'توقيع المعلم / المربي:', bold: true, margin: [0, 16, 0, 20] }, { text: '................................................', color: '#9ca3af' }], alignment: 'right' },
-          { width: '*', stack: [{ text: 'اعتماد إدارة المدرسة / الختم:', bold: true, margin: [0, 16, 0, 20] }, { text: '................................................', color: '#9ca3af' }], alignment: 'left' },
-        ],
-        margin: [0, 12, 0, 0],
+        table: {
+          widths: ['*', '*'],
+          body: [
+            [
+              {
+                stack: [
+                  { text: 'اعتماد إدارة المدرسة / الختم:', bold: true, fontSize: 8.5, margin: [0, 12, 0, 16] },
+                  { text: '................................................', color: '#9ca3af' },
+                ],
+                alignment: 'left' as const,
+                border: [false, false, false, false],
+              },
+              {
+                stack: [
+                  { text: 'توقيع المعلم / المربي:', bold: true, fontSize: 8.5, margin: [0, 12, 0, 16] },
+                  { text: '................................................', color: '#9ca3af' },
+                ],
+                alignment: 'right' as const,
+                border: [false, false, false, false],
+              },
+            ],
+          ],
+        },
+        layout: 'noBorders',
+        margin: [0, 10, 0, 0],
         unbreakable: true,
       },
     ],
     footer: (currentPage: number, pageCount: number) => ({
-      columns: [
-        { text: `تطبيق تفقد — تاريخ الإصدار: ${today}`, alignment: 'right', fontSize: 7.5, color: '#9ca3af' },
-        { text: `صفحة ${currentPage} من ${pageCount}`, alignment: 'left', fontSize: 7.5, color: '#9ca3af' },
-      ],
+      table: {
+        widths: ['*', '*'],
+        body: [
+          [
+            {
+              text: `صفحة ${currentPage} من ${pageCount}`,
+              alignment: 'left' as const,
+              fontSize: 7.5,
+              color: '#9ca3af',
+              border: [false, false, false, false],
+            },
+            {
+              text: `تطبيق تفقد — تاريخ الإصدار: ${today}`,
+              alignment: 'right' as const,
+              fontSize: 7.5,
+              color: '#9ca3af',
+              border: [false, false, false, false],
+            },
+          ],
+        ],
+      },
+      layout: 'noBorders',
       margin: [32, 10, 32, 0],
     }),
   }
 }
 
-export async function downloadStudentReportPdf(studentId: string, range: DateRange = {}): Promise<void> {
-  const [profile, settings] = await Promise.all([loadStudentProfile(studentId, range), getAllSettings()])
+export async function downloadStudentReportPdf(
+  studentId: string,
+  range: DateRange = {},
+  includeRank = true,
+  preloadedRanking?: ClassRankingResult | null,
+  preloadedProfile?: StudentProfile | null,
+): Promise<void> {
+  const [profile, settings, ranking] = await Promise.all([
+    preloadedProfile ? Promise.resolve(preloadedProfile) : loadStudentProfile(studentId, range),
+    getAllSettings(),
+    includeRank
+      ? (preloadedRanking !== undefined
+          ? Promise.resolve(preloadedRanking)
+          : loadClassRanking(range).catch(() => null))
+      : Promise.resolve(null),
+  ])
   if (!profile) throw new Error('الطالب غير موجود')
+
+  let rankingInfo: StudentRankingInfo | null = null
+  if (ranking) {
+    const studentRow = ranking.rows.find((r) => r.student.id === studentId)
+    if (studentRow) {
+      rankingInfo = {
+        rank: studentRow.rank,
+        totalRanked: ranking.rankedCount,
+        sufficientData: studentRow.sufficientData,
+        classSummary: ranking.classSummary,
+      }
+    }
+  }
+
   const pdfMake = await loadPdfMake()
   const safeName = profile.student.name.replace(/[\\/:*?"<>|]/g, '').trim() || 'طالب'
-  await pdfMake.createPdf(buildStudentReportDocument(profile, settings, range)).download(`تقرير-${safeName}-${todayLocal()}.pdf`)
+  await pdfMake
+    .createPdf(buildStudentReportDocument(profile, settings, range, todayLocal(), rankingInfo))
+    .download(`تقرير-${safeName}-${todayLocal()}.pdf`)
 }
+
 

@@ -35,9 +35,23 @@ export default defineConfig({
         clientsClaim: true,
         skipWaiting: true,
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
-        globPatterns: ['**/*.{js,css,html,svg,png,ttf,woff2,woff}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2,woff}'],
+        globIgnores: ['**/Cairo*.ttf', '**/*.ttf'],
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.endsWith('.ttf') || url.pathname.includes('Cairo'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'fonts-cache',
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
+              },
+            },
+          },
+        ],
       },
     }),
   ],

@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import AppHeader from './AppHeader'
 import AppNavigation from './AppNavigation'
+import BackupReminderBanner from './BackupReminderBanner'
 
 export default function Layout() {
   return (
@@ -8,6 +9,7 @@ export default function Layout() {
       <AppNavigation />
       <div className="flex-1 min-w-0">
         <AppHeader />
+        <BackupReminderBanner />
         <main className="mx-auto w-full max-w-3xl px-4 py-4 pb-28 md:pb-8">
           <Outlet />
         </main>

@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../db/database'
-import type { AttendanceDay, DayStats } from '../types/attendance'
+import { attendanceRepository } from '../db/attendanceRepository'
+import type { AttendanceDay, AttendanceRecord, DayStats } from '../types/attendance'
 import { computeStats } from '../services/statisticsService'
 
 export interface HistoryItem {
@@ -10,9 +10,12 @@ export interface HistoryItem {
 
 export function useAttendanceHistory(): HistoryItem[] | undefined {
   return useLiveQuery(async () => {
-    const days = (await db.attendanceDays.toArray()).sort((a, b) => b.date.localeCompare(a.date))
-    const records = await db.attendanceRecords.toArray()
-    const byDay = new Map<string, typeof records>()
+    const days = (await attendanceRepository.allDays()).sort((a, b) => b.date.localeCompare(a.date))
+    if (days.length === 0) return []
+
+    const dayIds = days.map((d) => d.id)
+    const records = await attendanceRepository.recordsForDays(dayIds)
+    const byDay = new Map<string, AttendanceRecord[]>()
     for (const r of records) {
       const list = byDay.get(r.dayId)
       if (list) list.push(r)

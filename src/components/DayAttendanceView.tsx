@@ -18,14 +18,18 @@ import StudentEvaluationCard from './StudentEvaluationCard'
 type Filter = 'all' | RecordStatus
 type ViewMode = 'attendance' | 'evaluation'
 
+import { useBackupReminder } from '../hooks/useBackupReminder'
+
 export default function DayAttendanceView({ dayId }: { dayId: string }) {
   const view = useDayView(dayId)
+  const backupReminder = useBackupReminder()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [unmarkedCount, setUnmarkedCount] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [confirmNotice, setConfirmNotice] = useState('')
   const [mode, setMode] = useState<ViewMode>('attendance')
   const [evaluationInfo, setEvaluationInfo] = useState('')
   const [isPrinting, setIsPrinting] = useState(false)
@@ -131,9 +135,12 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
     await guard(async () => {
       await attendanceService.confirmDay(dayId)
       setConfirmOpen(false)
+      if (backupReminder.status === 'stale' || backupReminder.status === 'never') {
+        setConfirmNotice('تم اعتماد تفقد اليوم بنجاح. تذكير خفيف: لم تقم بتصدير نسخة احتياطية لبياناتك مؤخراً، يُرجى تصدير نسخة من الإعدادات.')
+      }
     })
     setBusy(false)
-  }, [busy, dayId, guard])
+  }, [backupReminder.status, busy, dayId, guard])
 
   const exportPdf = useCallback(async () => {
     if (busy) return
@@ -216,6 +223,19 @@ export default function DayAttendanceView({ dayId }: { dayId: string }) {
       </div>
 
       <AttendanceSummary stats={stats} />
+ 
+      {confirmNotice && (
+        <div className="no-print flex items-center justify-between gap-2 rounded-xl border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900 shadow-sm animate-fade-in">
+          <p>{confirmNotice}</p>
+          <button
+            type="button"
+            className="text-xs font-bold text-teal-800 underline shrink-0 px-2 py-1"
+            onClick={() => setConfirmNotice('')}
+          >
+            إغلاق
+          </button>
+        </div>
+      )}
 
       {error && (
         <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-800">

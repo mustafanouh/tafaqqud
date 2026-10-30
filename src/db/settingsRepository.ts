@@ -5,6 +5,7 @@ export const SETTING_KEYS = {
   section: 'sectionName',
   teacher: 'teacherName',
   lastExport: 'lastExportAt',
+  backupSnoozedUntil: 'backupSnoozedUntil',
 } as const
 
 export async function getSetting(key: string): Promise<string> {

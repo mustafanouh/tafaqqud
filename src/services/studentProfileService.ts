@@ -1,4 +1,5 @@
-import { db } from '../db/database'
+import { studentRepository } from '../db/studentRepository'
+import { attendanceRepository } from '../db/attendanceRepository'
 import { effectiveBehavior, type AttendanceDay, type AttendanceRecord, type DayStats } from '../types/attendance'
 import type { Student } from '../types/student'
 import { computeStats } from './statisticsService'
@@ -40,27 +41,49 @@ export interface StudentProfile {
 const inRange = (date: string, range: DateRange) => (!range.from || date >= range.from) && (!range.to || date <= range.to)
 
 export function summarizeEvaluation(entries: AttendanceEntry[]): StudentEvaluationSummary {
-  const eligible = entries.filter((e) => e.record.status === 'present' || e.record.status === 'late')
-  const dictation = eligible.filter((e) => e.day.hasDictation && e.record.dictationScore !== null).map((e) => e.record.dictationScore as number)
-  const behavior = eligible.map((e) => effectiveBehavior(e.record))
-  const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
-  const homework = eligible.filter((e) => e.day.hasHomework)
+  let dictationSum = 0
+  let dictationCount = 0
+  let behaviorSum = 0
+  let eligibleCount = 0
+  let hwDone = 0
+  let hwPartial = 0
+  let hwNone = 0
+
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]
+    if (e.record.status !== 'present' && e.record.status !== 'late') continue
+
+    eligibleCount++
+    if (e.day.hasDictation && e.record.dictationScore !== null) {
+      dictationSum += e.record.dictationScore
+      dictationCount++
+    }
+
+    behaviorSum += effectiveBehavior(e.record)
+
+    if (e.day.hasHomework) {
+      if (e.record.homework === 'done') hwDone++
+      else if (e.record.homework === 'partial') hwPartial++
+      else if (e.record.homework === 'none') hwNone++
+    }
+  }
+
   return {
-    dictationCount: dictation.length,
-    averageDictation: avg(dictation),
-    averageBehavior: avg(behavior),
-    homeworkDone: homework.filter((e) => e.record.homework === 'done').length,
-    homeworkPartial: homework.filter((e) => e.record.homework === 'partial').length,
-    homeworkNone: homework.filter((e) => e.record.homework === 'none').length,
+    dictationCount,
+    averageDictation: dictationCount > 0 ? dictationSum / dictationCount : null,
+    averageBehavior: eligibleCount > 0 ? behaviorSum / eligibleCount : null,
+    homeworkDone: hwDone,
+    homeworkPartial: hwPartial,
+    homeworkNone: hwNone,
   }
 }
 
 export async function loadStudentProfile(studentId: string, range: DateRange = {}): Promise<StudentProfile | null> {
-  const student = await db.students.get(studentId)
+  const student = await studentRepository.get(studentId)
   if (!student) return null
 
-  const records = await db.attendanceRecords.where('studentId').equals(studentId).toArray()
-  const days = await db.attendanceDays.bulkGet(records.map((r) => r.dayId))
+  const records = await attendanceRepository.recordsForStudent(studentId)
+  const days = await attendanceRepository.bulkGetDays(records.map((r) => r.dayId))
   const dayMap = new Map(days.filter((d): d is AttendanceDay => !!d).map((d) => [d.id, d]))
 
   const attendance: AttendanceEntry[] = records

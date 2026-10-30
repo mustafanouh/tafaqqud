@@ -10,6 +10,8 @@ import { computeEvaluationStats, computeStats } from './statisticsService'
 import { BackupError, buildDayCsv, createBackup, parseBackupText, restoreBackup } from './backupService'
 import { parseNamesBlock } from '../utils/normalizeName'
 import { parseEvaluationNumber } from '../utils/evaluation'
+import { getWeekendDayName, isWeekend } from '../utils/date'
+import { getSetting, setSetting, SETTING_KEYS } from '../db/settingsRepository'
 
 beforeEach(async () => {
   await Promise.all([db.students.clear(), db.attendanceDays.clear(), db.attendanceRecords.clear(), db.settings.clear(), db.assessments.clear(), db.grades.clear()])
@@ -55,8 +57,8 @@ describe('الطلاب', () => {
 describe('التفقد', () => {
   it('لا ينشئ يوماً مكرراً ويبدأ كل شيء غير محدد', async () => {
     await seed(['أ', 'ب', 'ج'])
-    const d1 = await attendanceService.startOrGetDay('2026-10-23')
-    const d2 = await attendanceService.startOrGetDay('2026-10-23')
+    const d1 = await attendanceService.startOrGetDay('2026-10-21')
+    const d2 = await attendanceService.startOrGetDay('2026-10-21')
     expect(d2.id).toBe(d1.id)
     expect(await db.attendanceDays.count()).toBe(1)
     expect(computeStats(await attendanceRepository.recordsForDay(d1.id))).toMatchObject({ total: 3, unmarked: 3 })
@@ -64,7 +66,7 @@ describe('التفقد', () => {
 
   it('الاعتماد يحوّل غير المحدد فقط إلى غائب ويحفظ الملاحظات', async () => {
     await seed(['أ', 'ب', 'ج'])
-    const day = await attendanceService.startOrGetDay('2026-10-23')
+    const day = await attendanceService.startOrGetDay('2026-10-21')
     const [a, b] = await db.students.toArray()
     await attendanceService.setStatus(day.id, a.id, 'present')
     await attendanceService.setNote(day.id, b.id, 'مريض')
@@ -79,8 +81,8 @@ describe('التفقد', () => {
 
   it('غائب ← متأخر ← حاضر ولا يتأثر يوم آخر', async () => {
     await seed(['أ', 'ب'])
-    const d1 = await attendanceService.startOrGetDay('2026-10-22')
-    const d2 = await attendanceService.startOrGetDay('2026-10-23')
+    const d1 = await attendanceService.startOrGetDay('2026-10-20')
+    const d2 = await attendanceService.startOrGetDay('2026-10-21')
     await attendanceService.confirmDay(d1.id)
     await attendanceService.confirmDay(d2.id)
     const [a] = await db.students.toArray()
@@ -93,17 +95,21 @@ describe('التفقد', () => {
 
   it('ينبّه لوجود يوم سابق غير معتمد دون حذفه', async () => {
     await seed(['أ'])
-    await attendanceService.startOrGetDay('2026-10-22')
-    const prev = await attendanceService.unconfirmedDaysBefore('2026-10-23')
+    await attendanceService.startOrGetDay('2026-10-20')
+    const prev = await attendanceService.unconfirmedDaysBefore('2026-10-21')
     expect(prev).toHaveLength(1)
   })
 
-  it('يحفظ التقييم بالتقريب ولا يمسحه عند تغيير الحالة', async () => {
+  it('يحفظ التقييم بالتقريب ولا يمسحه عند تغيير الحالة ولا يعدّل الكائن الممرر', async () => {
     await seed(['أ'])
-    const day = await attendanceService.startOrGetDay('2026-10-23')
+    const day = await attendanceService.startOrGetDay('2026-10-21')
     const [student] = await db.students.toArray()
     await attendanceService.setStatus(day.id, student.id, 'present')
-    await attendanceService.setEvaluation(day.id, student.id, { dictationScore: 7.24, behaviorScore: 8.6, homework: 'partial' })
+    const evalInput = { dictationScore: 7.24, behaviorScore: 8.6, homework: 'partial' as const }
+    const snapshot = { ...evalInput }
+    await attendanceService.setEvaluation(day.id, student.id, evalInput)
+    // التأكد من عدم تعديل الكائن الممرر
+    expect(evalInput).toEqual(snapshot)
     await attendanceService.setStatus(day.id, student.id, 'absent')
     const record = (await attendanceRepository.record(day.id, student.id))!
     expect(record).toMatchObject({ dictationScore: 7, behaviorScore: 9, homework: 'partial' })
@@ -111,7 +117,7 @@ describe('التفقد', () => {
 
   it('يرفض التقييم خارج النطاق ويحدد الوظيفة للحاضرين غير المحددين فقط', async () => {
     await seed(['أ', 'ب', 'ج'])
-    const day = await attendanceService.startOrGetDay('2026-10-23')
+    const day = await attendanceService.startOrGetDay('2026-10-21')
     const students = await db.students.toArray()
     await attendanceService.setStatus(day.id, students[0].id, 'present')
     await attendanceService.setStatus(day.id, students[1].id, 'late')
@@ -125,7 +131,7 @@ describe('التفقد', () => {
 
   it('يحسب متوسطات التقييم والسلوك الافتراضي', async () => {
     await seed(['أ', 'ب', 'ج'])
-    const day = await attendanceService.startOrGetDay('2026-10-23')
+    const day = await attendanceService.startOrGetDay('2026-10-21')
     const students = await db.students.toArray()
     await attendanceService.setDayOptions(day.id, { hasDictation: true, hasHomework: true })
     await attendanceService.setStatus(day.id, students[0].id, 'present')
@@ -161,7 +167,7 @@ describe('الترقية وتحليل الأرقام', () => {
 describe('النسخ الاحتياطي', () => {
   it('تصدير ثم استيراد يعيد البيانات نفسها بما فيها الملاحظات', async () => {
     await studentService.addOne({ name: 'أ', notes: 'ملاحظة' })
-    const day = await attendanceService.startOrGetDay('2026-10-23')
+    const day = await attendanceService.startOrGetDay('2026-10-21')
     const [s] = await db.students.toArray()
     await attendanceService.setNote(day.id, s.id, 'وصل متأخراً بسبب المطر')
     const backup = await createBackup()
@@ -169,6 +175,16 @@ describe('النسخ الاحتياطي', () => {
     await restoreBackup(parseBackupText(JSON.stringify(backup)))
     expect((await db.students.toArray())[0].notes).toBe('ملاحظة')
     expect((await db.attendanceRecords.toArray())[0].note).toBe('وصل متأخراً بسبب المطر')
+  })
+
+  it('restoreBackup يحافظ على lastExportAt الأحدث إن كان الحالي أحدث من النسخة المستعادة', async () => {
+    await studentService.addOne({ name: 'أ' })
+    const backup = await createBackup()
+    backup.settings = { [SETTING_KEYS.lastExport]: '2026-10-15T12:00:00.000Z' }
+    // ضبط تاريخ أحدث حالياً
+    await setSetting(SETTING_KEYS.lastExport, '2026-10-25T15:00:00.000Z')
+    await restoreBackup(backup)
+    expect(await getSetting(SETTING_KEYS.lastExport)).toBe('2026-10-25T15:00:00.000Z')
   })
 
   it('يرفض الملفات غير الصحيحة', () => {
@@ -180,7 +196,7 @@ describe('النسخ الاحتياطي', () => {
   })
 
   it('يستورد النسخة الأولى ويطبع الحقول الجديدة بقيم افتراضية', () => {
-    const legacy = { format: 'tafaqqud-backup', version: 1, createdAt: '2026-10-23T00:00:00.000Z', settings: {}, students: [], days: [], records: [] }
+    const legacy = { format: 'tafaqqud-backup', version: 1, createdAt: '2026-10-21T00:00:00.000Z', settings: {}, students: [], days: [], records: [] }
     expect(parseBackupText(JSON.stringify(legacy))).toMatchObject({ version: 3, days: [], records: [], assessments: [], grades: [] })
     const current = { ...legacy, version: 2 }
     expect(parseBackupText(JSON.stringify(current)).version).toBe(3)
@@ -188,9 +204,9 @@ describe('النسخ الاحتياطي', () => {
 
   it('يرفض قيماً جديدة غير صالحة في النسخة الاحتياطية', () => {
     const invalid = {
-      format: 'tafaqqud-backup', version: 2, createdAt: '2026-10-23T00:00:00.000Z', settings: {},
+      format: 'tafaqqud-backup', version: 2, createdAt: '2026-10-21T00:00:00.000Z', settings: {},
       students: [{ id: 's', name: 'أ', active: 1 }],
-      days: [{ id: 'd', date: '2026-10-23', status: 'draft', hasDictation: true, hasHomework: false }],
+      days: [{ id: 'd', date: '2026-10-21', status: 'draft', hasDictation: true, hasHomework: false }],
       records: [{ id: 'r', dayId: 'd', studentId: 's', status: 'present', dictationScore: 10.25 }],
     }
     expect(() => parseBackupText(JSON.stringify(invalid))).toThrow('علامة الإملاء')
@@ -208,7 +224,7 @@ describe('النسخ الاحتياطي', () => {
 
   it('CSV يبدأ بـ BOM ويتضمن الملاحظات', async () => {
     await seed(['أ'])
-    const day = await attendanceService.startOrGetDay('2026-10-23')
+    const day = await attendanceService.startOrGetDay('2026-10-21')
     const [s] = await db.students.toArray()
     await attendanceService.setNote(day.id, s.id, 'ملاحظة اليوم')
     const csv = await buildDayCsv(day.id)
@@ -216,3 +232,24 @@ describe('النسخ الاحتياطي', () => {
     expect(csv.content).toContain('ملاحظة اليوم')
   })
 })
+
+describe('التحقق من العطلة الأسبوعية', () => {
+  it('يكشف يومي الجمعة والسبت كأيام عطلة واسم اليوم الصحيح ويرفض بدء التفقد فيها', async () => {
+    expect(isWeekend('2026-10-30')).toBe(true) // الجمعة
+    expect(getWeekendDayName('2026-10-30')).toBe('الجمعة')
+
+    expect(isWeekend('2026-10-31')).toBe(true) // السبت
+    expect(getWeekendDayName('2026-10-31')).toBe('السبت')
+
+    expect(isWeekend('2026-11-01')).toBe(false) // الأحد
+    expect(getWeekendDayName('2026-11-01')).toBeNull()
+
+    expect(isWeekend('2026-10-29')).toBe(false) // الخميس
+    expect(getWeekendDayName('2026-10-29')).toBeNull()
+
+    // startOrGetDay يرمي خطأ بالعربية في العطلة
+    await expect(attendanceService.startOrGetDay('2026-10-30')).rejects.toThrow('لا يمكن بدء تفقد في يوم عطلة (الجمعة)')
+    await expect(attendanceService.startOrGetDay('2026-10-31')).rejects.toThrow('لا يمكن بدء تفقد في يوم عطلة (السبت)')
+  })
+})
+

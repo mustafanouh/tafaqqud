@@ -1,23 +1,27 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { RefreshCw, Trash2 } from 'lucide-react'
+import { RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
 import BackupSection from '../components/BackupSection'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { db } from '../db/database'
 import { SETTING_KEYS, getAllSettings, setSetting } from '../db/settingsRepository'
+import { useBackupReminder } from '../hooks/useBackupReminder'
+import { formatDateTimeAr } from '../utils/date'
 
 const APP_VERSION = '1.1.0'
 
 export default function SettingsPage() {
   const location = useLocation()
   const saved = useLiveQuery(getAllSettings, [])
+  const backupReminder = useBackupReminder()
   const [school, setSchool] = useState('')
   const [section, setSection] = useState('')
   const [teacher, setTeacher] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [usage, setUsage] = useState('')
+  const [isPersisted, setIsPersisted] = useState<boolean | null>(null)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [clearing, setClearing] = useState(false)
 
@@ -40,7 +44,17 @@ export default function SettingsPage() {
 
   useEffect(() => {
     refreshUsage()
+    if (typeof navigator !== 'undefined' && navigator.storage?.persisted) {
+      navigator.storage.persisted().then(setIsPersisted).catch(() => {})
+    }
   }, [])
+
+  const requestPersistence = async () => {
+    if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
+      const persisted = await navigator.storage.persist().catch(() => false)
+      setIsPersisted(persisted)
+    }
+  }
 
   const save = async () => {
     setError('')
@@ -129,6 +143,64 @@ export default function SettingsPage() {
         {usage && <p>المساحة المستخدمة تقريباً: {usage}</p>}
         <p>البيانات محلية على هذا الجهاز ولا تُرسل إلى أي خادم.</p>
         <p>تم الإنشاء بواسطة: م.مصطفى نوح</p>
+      </div>
+ 
+      {/* مؤشر حماية البيانات والنسخ الاحتياطي */}
+      <div className="card space-y-3 p-4">
+        <h3 className="font-bold flex items-center gap-2 text-base text-gray-900">
+          <ShieldCheck size={20} className="text-teal-700" aria-hidden />
+          حالة حماية البيانات والتخزين
+        </h3>
+
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 text-sm">
+          <div className="rounded-xl border border-gray-100 bg-gray-50/80 p-3 space-y-1">
+            <span className="text-xs font-semibold text-gray-500 block">آخر نسخة احتياطية:</span>
+            <div className="font-bold text-gray-900 flex items-center gap-1.5">
+              <span className={`inline-block h-2 w-2 rounded-full ${backupReminder.status === 'ok' ? 'bg-teal-500' : 'bg-orange-500'}`} />
+              {backupReminder.lastExportAt ? formatDateTimeAr(backupReminder.lastExportAt) : 'لم يتم التصدير بعد'}
+            </div>
+            <p className="text-xs text-gray-600">
+              {backupReminder.status === 'ok'
+                ? 'النسخة الاحتياطية حديثة وآمنة.'
+                : backupReminder.status === 'stale'
+                  ? `مرّ ${backupReminder.daysSinceLast?.toLocaleString('ar-SY')} يوماً دون تصدير جديد.`
+                  : 'يُوصى بتصدير نسخة احتياطية لحماية بيانات الطلاب.'}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 bg-gray-50/80 p-3 space-y-1">
+            <span className="text-xs font-semibold text-gray-500 block">حالة التخزين على المتصفح:</span>
+            <div className="font-bold text-gray-900 flex items-center gap-1.5">
+              {isPersisted ? (
+                <>
+                  <span className="inline-block h-2 w-2 rounded-full bg-teal-500" />
+                  <span className="text-teal-800">تخزين دائم ومحمي</span>
+                </>
+              ) : isPersisted === false ? (
+                <>
+                  <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+                  <span className="text-amber-800">تخزين افتراضي (غير دائم)</span>
+                </>
+              ) : (
+                <span className="text-gray-500">جاري التحقق…</span>
+              )}
+            </div>
+            <p className="text-xs text-gray-600">
+              {isPersisted
+                ? 'المتصفح لن يقوم بحذف بيانات تفقد تلقائياً عند امتلاء الذاكرة.'
+                : 'قد يقوم المتصفح بحذف البيانات إذا نفدت مساحة الجهاز. صدّر نسخاً دورية.'}
+            </p>
+            {isPersisted === false && (
+              <button
+                type="button"
+                onClick={requestPersistence}
+                className="mt-1 text-xs font-bold text-teal-700 underline block"
+              >
+                تفعيل الحماية الدائمة
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       <BackupSection />

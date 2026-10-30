@@ -3,10 +3,10 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { AlertTriangle, Download, FileSpreadsheet, Upload } from 'lucide-react'
 import ConfirmDialog from './ConfirmDialog'
 import { SETTING_KEYS, getSetting } from '../db/settingsRepository'
-import { BackupError, buildAllCsv, createBackup, markExported, parseBackupText, restoreBackup } from '../services/backupService'
+import { BackupError, buildAllCsv, exportBackupFile, parseBackupText, restoreBackup } from '../services/backupService'
 import type { BackupFile } from '../types/backup'
 import { downloadText } from '../utils/csv'
-import { formatDateTimeAr, todayLocal } from '../utils/date'
+import { formatDateTimeAr } from '../utils/date'
 
 export default function BackupSection() {
   const lastExport = useLiveQuery(() => getSetting(SETTING_KEYS.lastExport), [])
@@ -22,10 +22,8 @@ export default function BackupSection() {
     setError('')
     setInfo('')
     try {
-      const backup = await createBackup()
-      downloadText(`tafaqqud-backup-${todayLocal()}.json`, JSON.stringify(backup, null, 2), 'application/json')
-      await markExported()
-      setInfo('تم تصدير النسخة الاحتياطية. احفظ الملف في مكان آمن.')
+      const { shared } = await exportBackupFile()
+      setInfo(shared ? 'تمت مشاركة النسخة الاحتياطية بنجاح.' : 'تم تصدير النسخة الاحتياطية. احفظ الملف في مكان آمن.')
     } catch (e) {
       fail(e)
     }

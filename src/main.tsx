@@ -5,17 +5,20 @@ import './styles/index.css'
 import App from './app/App'
 
 // التحديث التلقائي للنسخة الجديدة
-if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-  try {
-    const updateSW = registerSW({
-      immediate: true,
-      onNeedRefresh() {
-        updateSW(true)
-      },
-    })
-  } catch (err) {
-    console.warn('Service worker registration error:', err)
-  }
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    updateSW(true)
+  },
+})
+
+// طلب التخزين الدائم لحماية البيانات من الحذف التلقائي للمتصفح
+if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.persist === 'function') {
+  navigator.storage.persisted?.().then((isPersisted) => {
+    if (!isPersisted) {
+      navigator.storage.persist().catch(() => {})
+    }
+  }).catch(() => {})
 }
 
 createRoot(document.getElementById('root')!).render(

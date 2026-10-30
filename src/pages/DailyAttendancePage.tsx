@@ -1,15 +1,19 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, CalendarX2 } from 'lucide-react'
 import DayAttendanceView from '../components/DayAttendanceView'
 import EmptyState from '../components/EmptyState'
 import { db } from '../db/database'
 import { attendanceService } from '../services/attendanceService'
-import { formatDateAr, todayLocal } from '../utils/date'
+import { formatDateAr, getWeekendDayName, isWeekend } from '../utils/date'
+import { useToday } from '../hooks/useToday'
 
 export default function DailyAttendancePage() {
-  const today = todayLocal()
+  const today = useToday()
+  const isTodayWeekend = isWeekend(today)
+  const weekendName = getWeekendDayName(today)
+
   const state = useLiveQuery(async () => {
     const day = await db.attendanceDays.where('date').equals(today).first()
     const activeStudents = await db.students.where('active').equals(1).count()
@@ -23,6 +27,10 @@ export default function DailyAttendancePage() {
 
   const start = async () => {
     if (busy) return
+    if (isTodayWeekend) {
+      setError(`اليوم عطلة أسبوعية (${weekendName})، لا يمكن بدء تفقد جديد في أيام الجمعة والسبت.`)
+      return
+    }
     setBusy(true)
     setError('')
     try {
@@ -36,6 +44,18 @@ export default function DailyAttendancePage() {
 
   return (
     <div className="space-y-3">
+      {isTodayWeekend && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-amber-900 shadow-sm">
+          <CalendarX2 size={22} className="mt-0.5 shrink-0 text-amber-700" aria-hidden />
+          <div>
+            <p className="font-bold">اليوم عطلة ({weekendName})</p>
+            <p className="mt-0.5 text-sm text-amber-800">
+              اليوم عطلة أسبوعية رسمية (الجمعة والسبت). لا يتم تسجيل تفقد للطلاب في أيام العطلة.
+            </p>
+          </div>
+        </div>
+      )}
+
       {state.previousDrafts.length > 0 && (
         <div className="flex items-start gap-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-orange-900">
           <AlertTriangle size={20} className="mt-0.5 shrink-0" aria-hidden />
@@ -66,6 +86,20 @@ export default function DailyAttendancePage() {
             </Link>
           }
         />
+      ) : isTodayWeekend ? (
+        <EmptyState
+          title="اليوم عطلة"
+          text={`${formatDateAr(today)} — عطلة أسبوعية (${weekendName}). تم إيقاف زر بدء التفقد.`}
+          action={
+            <button
+              className="btn-primary cursor-not-allowed opacity-50 bg-gray-400 hover:bg-gray-400 border-gray-400 text-white shadow-none pointer-events-none"
+              disabled
+              title={`اليوم عطلة (${weekendName})`}
+            >
+              بدء تفقد اليوم (عطلة)
+            </button>
+          }
+        />
       ) : (
         <EmptyState
           title="لم يبدأ تفقد اليوم"
@@ -80,3 +114,4 @@ export default function DailyAttendancePage() {
     </div>
   )
 }
+

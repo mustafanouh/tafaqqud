@@ -1,13 +1,15 @@
 import { db } from '../db/database'
-import { getAllSettings, setSetting, SETTING_KEYS } from '../db/settingsRepository'
+import { getAllSettings, getSetting, setSetting, SETTING_KEYS } from '../db/settingsRepository'
 import { BACKUP_FORMAT, BACKUP_VERSION, type BackupFile } from '../types/backup'
 import { STATUS_LABEL, type AttendanceDay, type AttendanceRecord, type HomeworkStatus, type RecordStatus } from '../types/attendance'
 import type { Assessment, AssessmentType, Grade } from '../types/assessment'
 import type { Student } from '../types/student'
-import { isValidDateString, nowIso } from '../utils/date'
-import { toCsv } from '../utils/csv'
+import { isValidDateString, nowIso, todayLocal } from '../utils/date'
+import { downloadText, toCsv } from '../utils/csv'
 
 const RECORD_STATUSES: RecordStatus[] = ['unmarked', 'present', 'absent', 'late']
+
+export const BACKUP_STALE_DAYS = 7
 
 export class BackupError extends Error { }
 
@@ -25,6 +27,39 @@ export async function createBackup(): Promise<BackupFile> {
 
 export async function markExported(): Promise<void> {
   await setSetting(SETTING_KEYS.lastExport, nowIso())
+}
+
+/** تصدير موحد يدعم Web Share API على الجوال ويرجع للتنزيل العادي */
+export async function exportBackupFile(): Promise<{ shared: boolean; filename: string }> {
+  const backup = await createBackup()
+  const filename = `tafaqqud-backup-${todayLocal()}.json`
+  const jsonText = JSON.stringify(backup, null, 2)
+  let shared = false
+
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function' && typeof File !== 'undefined') {
+    try {
+      const file = new File([jsonText], filename, { type: 'application/json' })
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: 'نسخة تفقد الاحتياطية',
+          text: `نسخة احتياطية لتطبيق تفقد — ${todayLocal()}`,
+        })
+        shared = true
+      }
+    } catch (e: unknown) {
+      if ((e as Error)?.name === 'AbortError') {
+        return { shared: false, filename }
+      }
+    }
+  }
+
+  if (!shared) {
+    downloadText(filename, jsonText, 'application/json')
+  }
+
+  await markExported()
+  return { shared, filename }
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -197,8 +232,20 @@ export function parseBackupText(text: string): BackupFile {
   return validateBackup(raw)
 }
 
-/** استبدال كامل للبيانات المحلية داخل معاملة واحدة (تفشل كلها أو تنجح كلها) */
+/** استبدال كامل للبيانات المحلية داخل معاملة واحدة (تفشل كلها أو تنجح كلها) مع الحفاظ على lastExportAt إن كان الحالي أحدث */
 export async function restoreBackup(backup: BackupFile): Promise<void> {
+  const currentLastExport = await getSetting(SETTING_KEYS.lastExport)
+  const backupLastExport = backup.settings?.[SETTING_KEYS.lastExport] || ''
+  const preservedLastExport =
+    currentLastExport && (!backupLastExport || currentLastExport > backupLastExport)
+      ? currentLastExport
+      : backupLastExport
+
+  const settingsToSave = { ...backup.settings }
+  if (preservedLastExport) {
+    settingsToSave[SETTING_KEYS.lastExport] = preservedLastExport
+  }
+
   await db.transaction('rw', [db.students, db.attendanceDays, db.attendanceRecords, db.settings, db.assessments, db.grades], async () => {
     await Promise.all([db.students.clear(), db.attendanceDays.clear(), db.attendanceRecords.clear(), db.settings.clear(), db.assessments.clear(), db.grades.clear()])
     await db.students.bulkAdd(backup.students)
@@ -206,7 +253,7 @@ export async function restoreBackup(backup: BackupFile): Promise<void> {
     await db.attendanceRecords.bulkAdd(backup.records)
     await db.assessments.bulkAdd(backup.assessments)
     await db.grades.bulkAdd(backup.grades)
-    await db.settings.bulkAdd(Object.entries(backup.settings).map(([key, value]) => ({ key, value })))
+    await db.settings.bulkAdd(Object.entries(settingsToSave).map(([key, value]) => ({ key, value })))
   })
 }
 

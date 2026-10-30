@@ -1,16 +1,16 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowRight, FileText, Pencil, Trash2 } from 'lucide-react'
+import { ArrowRight, Pencil, Trash2 } from 'lucide-react'
 import AssessmentForm from '../components/AssessmentForm'
 import ConfirmDialog from '../components/ConfirmDialog'
 import EmptyState from '../components/EmptyState'
 import GradeRow from '../components/GradeRow'
 import SearchInput from '../components/SearchInput'
 import { db } from '../db/database'
-import { downloadAssessmentReportPdf } from '../services/assessmentPdfService'
 import { gradeService, toPercent, type AssessmentInput } from '../services/gradeService'
 import { ASSESSMENT_TYPE_LABEL } from '../types/assessment'
+import type { Student } from '../types/student'
 import { formatDateAr } from '../utils/date'
 import { formatScore } from '../utils/evaluation'
 import { normalizeName } from '../utils/normalizeName'
@@ -23,10 +23,20 @@ export default function AssessmentPage() {
     if (!assessment) return { assessment: undefined, rows: [] }
     const grades = await db.grades.where('assessmentId').equals(assessmentId).toArray()
     const byStudent = new Map(grades.map((g) => [g.studentId, g]))
-    const students = await db.students.toArray()
-    // النشطون + أي طالب معطّل له علامة في هذا الاختبار
+
+    // النشطون + الطلاب المعطلون الذين لديهم علامات في هذا الاختبار فقط عبر bulkGet
+    const activeStudents = await db.students.where('active').equals(1).toArray()
+    const activeIds = new Set(activeStudents.map((s) => s.id))
+    const inactiveStudentIdsWithGrades = grades
+      .map((g) => g.studentId)
+      .filter((id) => !activeIds.has(id))
+
+    const inactiveStudents = inactiveStudentIdsWithGrades.length > 0
+      ? (await db.students.bulkGet(inactiveStudentIdsWithGrades)).filter((s): s is Student => !!s)
+      : []
+
+    const students = [...activeStudents, ...inactiveStudents]
     const rows = students
-      .filter((s) => s.active === 1 || byStudent.has(s.id))
       .sort((a, b) => a.name.localeCompare(b.name, 'ar'))
       .map((student) => ({ student, grade: byStudent.get(student.id) }))
     return { assessment, rows }
@@ -37,19 +47,6 @@ export default function AssessmentPage() {
   const [deleting, setDeleting] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-
-  const exportPdf = async () => {
-    if (busy) return
-    setBusy(true)
-    setError('')
-    try {
-      await downloadAssessmentReportPdf(assessmentId)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'تعذر إنشاء التقرير')
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const save = useCallback(
     async (studentId: string, input: { score?: number | null; absent?: boolean }) => {
@@ -159,10 +156,6 @@ export default function AssessmentPage() {
           {error}
         </div>
       )}
-
-      <button className="btn-primary w-full" onClick={exportPdf} disabled={busy}>
-        <FileText size={18} aria-hidden /> {busy ? 'جارٍ التجهيز…' : 'تنزيل كشف العلامات PDF (كل الطلاب)'}
-      </button>
 
       <SearchInput value={query} onChange={setQuery} />
       {visible.length === 0 ? (
